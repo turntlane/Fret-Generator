@@ -1,9 +1,13 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 type Unit = "mm" | "in";
-type MarkerShape = "dot" | "double-dot" | "rectangle" | "diamond" | "trapezoid";
+type MarkerShape = "dot" | "rectangle" | "diamond" | "trapezoid";
+type MarkerCount = 1 | 2;
+type GCodeFileExtension = ".nc" | ".gcode" | ".tap" | ".cnc" | ".ngc";
+type GCodeProgram = "fret-slots" | "fretboard-markers" | "fretboard-cutout";
 
 type FormState = {
   unit: Unit;
@@ -13,6 +17,8 @@ type FormState = {
   bridgeStringSpread: number;
   fretboardOverhang: number;
   fretInset: number;
+  nutEndMargin: number;
+  lastFretEndMargin: number;
   materialWidth: number;
   materialLength: number;
   materialThickness: number;
@@ -22,6 +28,17 @@ type FormState = {
   feedRate: number;
   depthPerPass: number;
   spindleRpm: number;
+  cutoutBitDiameter: number;
+  cutoutDepth: number;
+  cutoutDepthPerPass: number;
+  cutoutFeedRate: number;
+  cutoutPlungeRate: number;
+  cutoutSpindleRpm: number;
+  cutoutAllowance: number;
+  cutoutTabsEnabled: boolean;
+  tabCount: number;
+  tabWidth: number;
+  tabHeight: number;
   markersEnabled: boolean;
   markerShape: MarkerShape;
   markerFrets: string;
@@ -57,12 +74,39 @@ type Layout = {
   slots: FretSlot[];
 };
 
+type Point = {
+  x: number;
+  y: number;
+};
+
+type FretboardOutline = {
+  startY: number;
+  endY: number;
+  nutWidth: number;
+  endWidth: number;
+  points: Point[];
+  cutterPath: Point[];
+};
+
 type MarkerPocket = {
   id: string;
   fretSpace: number;
+  markerIndex: number;
+  markerCount: MarkerCount;
   centerX: number;
   y: number;
   shape: MarkerShape;
+};
+
+type MarkerAssignment = {
+  fretSpace: number;
+  count: MarkerCount;
+};
+
+type ParsedMarkerAssignments = {
+  assignments: MarkerAssignment[];
+  invalidTokens: string[];
+  duplicateFrets: number[];
 };
 
 const defaultMetricState: FormState = {
@@ -73,6 +117,8 @@ const defaultMetricState: FormState = {
   bridgeStringSpread: 52,
   fretboardOverhang: 3,
   fretInset: 1.5,
+  nutEndMargin: 6,
+  lastFretEndMargin: 12,
   materialWidth: 70,
   materialLength: 500,
   materialThickness: 8,
@@ -82,9 +128,20 @@ const defaultMetricState: FormState = {
   feedRate: 300,
   depthPerPass: 0.3,
   spindleRpm: 18000,
+  cutoutBitDiameter: 3.175,
+  cutoutDepth: 8,
+  cutoutDepthPerPass: 1,
+  cutoutFeedRate: 240,
+  cutoutPlungeRate: 80,
+  cutoutSpindleRpm: 18000,
+  cutoutAllowance: 0,
+  cutoutTabsEnabled: true,
+  tabCount: 4,
+  tabWidth: 8,
+  tabHeight: 1.5,
   markersEnabled: true,
   markerShape: "dot",
-  markerFrets: "3,5,7,9,12,15,17,19,21",
+  markerFrets: "3,5,7,9,12:2,15,17:2,19,21",
   markerWidth: 6,
   markerLength: 6,
   markerTopWidth: 4,
@@ -98,12 +155,22 @@ const defaultMetricState: FormState = {
   doubleMarkerSpacing: 18,
 };
 
+const gCodeFileExtensions: GCodeFileExtension[] = [
+  ".nc",
+  ".gcode",
+  ".tap",
+  ".cnc",
+  ".ngc",
+];
+
 const linearInputKeys: Array<keyof FormState> = [
   "scaleLength",
   "nutStringSpread",
   "bridgeStringSpread",
   "fretboardOverhang",
   "fretInset",
+  "nutEndMargin",
+  "lastFretEndMargin",
   "materialWidth",
   "materialLength",
   "materialThickness",
@@ -111,6 +178,14 @@ const linearInputKeys: Array<keyof FormState> = [
   "fretboardRadius",
   "slotDepth",
   "depthPerPass",
+  "cutoutBitDiameter",
+  "cutoutDepth",
+  "cutoutDepthPerPass",
+  "cutoutFeedRate",
+  "cutoutPlungeRate",
+  "cutoutAllowance",
+  "tabWidth",
+  "tabHeight",
   "markerWidth",
   "markerLength",
   "markerTopWidth",
@@ -131,12 +206,40 @@ function formatNumber(value: number, digits = 4) {
   return Number.isFinite(value) ? value.toFixed(digits) : "0";
 }
 
+function gCodeComment(text: string) {
+  return `(${text.replace(/[()]/g, "").replace(/\s+/g, " ").trim()})`;
+}
+
+function gCodeFilename(extension: GCodeFileExtension, program: GCodeProgram) {
+  return `${program}${extension}`;
+}
+
+function gCodeFileTypeLabel(extension: GCodeFileExtension) {
+  switch (extension) {
+    case ".gcode":
+      return "Generic G-code";
+    case ".tap":
+      return "TAP G-code";
+    case ".cnc":
+      return "CNC program";
+    case ".ngc":
+      return "LinuxCNC NGC";
+    case ".nc":
+    default:
+      return "NC G-code";
+  }
+}
+
 function svgNumber(value: number) {
   return formatNumber(value, 6);
 }
 
 function rounded(value: number, digits = 4) {
   return Number(value.toFixed(digits));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function convertUnits(state: FormState, nextUnit: Unit): FormState {
@@ -207,11 +310,97 @@ function calculateLayout(input: FormState): Layout {
   };
 }
 
-function parseMarkerFrets(value: string) {
-  return value
+function fretboardWidthAtScalePosition(input: FormState, scalePosition: number) {
+  const taperRatio = clamp(scalePosition / input.scaleLength, 0, 1);
+  const stringSpread =
+    input.nutStringSpread +
+    (input.bridgeStringSpread - input.nutStringSpread) * taperRatio;
+  return stringSpread + input.fretboardOverhang * 2;
+}
+
+function calculateFretboardOutline(
+  input: FormState,
+  layout: Layout,
+): FretboardOutline {
+  const startY = layout.nutY - Number(input.nutEndMargin);
+  const endY = layout.lastFretY + Number(input.lastFretEndMargin);
+  const nutWidth = Number(input.nutStringSpread) + Number(input.fretboardOverhang) * 2;
+  const endWidth = fretboardWidthAtScalePosition(
+    input,
+    Math.max(endY - layout.nutY, 0),
+  );
+  const toolOffset =
+    Number(input.cutoutBitDiameter) / 2 + Number(input.cutoutAllowance);
+
+  const points = [
+    { x: layout.centerX - nutWidth / 2, y: startY },
+    { x: layout.centerX + nutWidth / 2, y: startY },
+    { x: layout.centerX + endWidth / 2, y: endY },
+    { x: layout.centerX - endWidth / 2, y: endY },
+  ];
+
+  const cutterPath = [
+    { x: layout.centerX - nutWidth / 2 - toolOffset, y: startY - toolOffset },
+    { x: layout.centerX + nutWidth / 2 + toolOffset, y: startY - toolOffset },
+    { x: layout.centerX + endWidth / 2 + toolOffset, y: endY + toolOffset },
+    { x: layout.centerX - endWidth / 2 - toolOffset, y: endY + toolOffset },
+  ];
+
+  return {
+    startY,
+    endY,
+    nutWidth,
+    endWidth,
+    points,
+    cutterPath,
+  };
+}
+
+function parseMarkerAssignments(value: string): ParsedMarkerAssignments {
+  const assignments: MarkerAssignment[] = [];
+  const invalidTokens: string[] = [];
+  const duplicateFrets = new Set<number>();
+  const seenFrets = new Set<number>();
+
+  for (const token of value
     .split(",")
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isInteger(item));
+    .map((item) => item.trim())
+    .filter(Boolean)) {
+    const match = token.match(/^(\d+)(?::([12]))?$/);
+
+    if (!match) {
+      invalidTokens.push(token);
+      continue;
+    }
+
+    const fretSpace = Number(match[1]);
+    const count = (match[2] ? Number(match[2]) : 1) as MarkerCount;
+
+    if (seenFrets.has(fretSpace)) {
+      duplicateFrets.add(fretSpace);
+      continue;
+    }
+
+    seenFrets.add(fretSpace);
+    assignments.push({ fretSpace, count });
+  }
+
+  return {
+    assignments: assignments.sort((a, b) => a.fretSpace - b.fretSpace),
+    invalidTokens,
+    duplicateFrets: Array.from(duplicateFrets).sort((a, b) => a - b),
+  };
+}
+
+function formatMarkerAssignments(assignments: MarkerAssignment[]) {
+  return assignments
+    .sort((a, b) => a.fretSpace - b.fretSpace)
+    .map((assignment) =>
+      assignment.count === 1
+        ? String(assignment.fretSpace)
+        : `${assignment.fretSpace}:2`,
+    )
+    .join(",");
 }
 
 function markerCenterY(fretSpace: number, layout: Layout) {
@@ -231,7 +420,8 @@ function calculateMarkers(input: FormState, layout: Layout): MarkerPocket[] {
     return [];
   }
 
-  return parseMarkerFrets(input.markerFrets).flatMap((fretSpace): MarkerPocket[] => {
+  return parseMarkerAssignments(input.markerFrets).assignments.flatMap((assignment): MarkerPocket[] => {
+    const { fretSpace, count } = assignment;
     const y = markerCenterY(fretSpace, layout);
     if (!Number.isFinite(y)) {
       return [];
@@ -239,12 +429,14 @@ function calculateMarkers(input: FormState, layout: Layout): MarkerPocket[] {
 
     const baseX = layout.centerX + Number(input.markerXOffset);
 
-    if (input.markerShape === "double-dot") {
+    if (count === 2) {
       const spacing = Number(input.doubleMarkerSpacing);
       return [
         {
           id: `${fretSpace}-bass`,
           fretSpace,
+          markerIndex: 1,
+          markerCount: count,
           centerX: baseX - spacing / 2,
           y,
           shape: input.markerShape,
@@ -252,6 +444,8 @@ function calculateMarkers(input: FormState, layout: Layout): MarkerPocket[] {
         {
           id: `${fretSpace}-treble`,
           fretSpace,
+          markerIndex: 2,
+          markerCount: count,
           centerX: baseX + spacing / 2,
           y,
           shape: input.markerShape,
@@ -263,6 +457,8 @@ function calculateMarkers(input: FormState, layout: Layout): MarkerPocket[] {
       {
         id: `${fretSpace}`,
         fretSpace,
+        markerIndex: 1,
+        markerCount: count,
         centerX: baseX,
         y,
         shape: input.markerShape,
@@ -346,7 +542,12 @@ function scaledPolygon(points: Array<{ x: number; y: number }>, scale: number) {
   }));
 }
 
-function getValidationMessages(input: FormState, layout: Layout) {
+function getValidationMessages(
+  input: FormState,
+  layout: Layout,
+  includeMarkers = true,
+  includeCutout = true,
+) {
   const errors: string[] = [];
   const warnings: string[] = [];
   const positiveFields: Array<[keyof FormState, string]> = [
@@ -364,6 +565,17 @@ function getValidationMessages(input: FormState, layout: Layout) {
     ["depthPerPass", "Depth per pass"],
     ["spindleRpm", "Spindle RPM"],
   ];
+
+  if (includeCutout) {
+    positiveFields.push(
+      ["cutoutBitDiameter", "Cutout bit diameter"],
+      ["cutoutDepth", "Cutout depth"],
+      ["cutoutDepthPerPass", "Cutout depth per pass"],
+      ["cutoutFeedRate", "Cutout feed rate"],
+      ["cutoutPlungeRate", "Cutout plunge rate"],
+      ["cutoutSpindleRpm", "Cutout spindle RPM"],
+    );
+  }
 
   for (const [key, label] of positiveFields) {
     if (!Number.isFinite(Number(input[key])) || Number(input[key]) <= 0) {
@@ -415,7 +627,85 @@ function getValidationMessages(input: FormState, layout: Layout) {
     warnings.push("Slot depth is equal to or deeper than the material thickness.");
   }
 
-  if (input.markersEnabled) {
+  if (includeCutout) {
+    if (!Number.isFinite(Number(input.nutEndMargin)) || Number(input.nutEndMargin) < 0) {
+      errors.push("Nut end margin cannot be negative.");
+    }
+
+    if (
+      !Number.isFinite(Number(input.lastFretEndMargin)) ||
+      Number(input.lastFretEndMargin) < 0
+    ) {
+      errors.push("Last fret end margin cannot be negative.");
+    }
+
+    if (
+      !Number.isFinite(Number(input.cutoutAllowance)) ||
+      Number(input.cutoutAllowance) < 0
+    ) {
+      errors.push("Cutout allowance cannot be negative.");
+    }
+
+    if (Number(input.cutoutDepth) > Number(input.materialThickness)) {
+      errors.push("Cutout depth cannot be deeper than the material thickness.");
+    } else if (Number(input.cutoutDepth) === Number(input.materialThickness)) {
+      warnings.push("Cutout depth is full material thickness; use tabs or strong workholding.");
+    }
+
+    const outline = calculateFretboardOutline(input, layout);
+
+    if (outline.startY < 0) {
+      errors.push("Nut end margin places the fretboard cutout before the material.");
+    }
+
+    if (outline.endY > Number(input.materialLength)) {
+      errors.push("Last fret end margin places the fretboard cutout beyond the material.");
+    }
+
+    if (
+      outline.points.some(
+        (point) =>
+          point.x < 0 ||
+          point.x > Number(input.materialWidth) ||
+          point.y < 0 ||
+          point.y > Number(input.materialLength),
+      )
+    ) {
+      errors.push("Fretboard outline extends beyond the material.");
+    }
+
+    if (
+      outline.cutterPath.some(
+        (point) =>
+          point.x < 0 ||
+          point.x > Number(input.materialWidth) ||
+          point.y < 0 ||
+          point.y > Number(input.materialLength),
+      )
+    ) {
+      errors.push("Cutout cutter path extends beyond the material.");
+    }
+
+    if (input.cutoutTabsEnabled) {
+      if (!Number.isInteger(input.tabCount) || input.tabCount < 1) {
+        errors.push("Tab count must be a whole number greater than zero.");
+      }
+
+      if (!Number.isFinite(Number(input.tabWidth)) || Number(input.tabWidth) <= 0) {
+        errors.push("Tab width must be greater than zero.");
+      }
+
+      if (!Number.isFinite(Number(input.tabHeight)) || Number(input.tabHeight) <= 0) {
+        errors.push("Tab height must be greater than zero.");
+      }
+
+      if (Number(input.tabHeight) >= Number(input.cutoutDepth)) {
+        errors.push("Tab height must be smaller than cutout depth.");
+      }
+    }
+  }
+
+  if (includeMarkers && input.markersEnabled) {
     const markerFields: Array<[keyof FormState, string]> = [
       ["markerWidth", "Marker width"],
       ["markerDepth", "Marker depth"],
@@ -426,7 +716,7 @@ function getValidationMessages(input: FormState, layout: Layout) {
       ["markerSpindleRpm", "Marker spindle RPM"],
     ];
 
-    if (input.markerShape !== "dot" && input.markerShape !== "double-dot") {
+    if (input.markerShape !== "dot") {
       markerFields.push(["markerLength", "Marker length"]);
     }
 
@@ -434,7 +724,12 @@ function getValidationMessages(input: FormState, layout: Layout) {
       markerFields.push(["markerTopWidth", "Trapezoid top width"]);
     }
 
-    if (input.markerShape === "double-dot") {
+    const parsedMarkerAssignments = parseMarkerAssignments(input.markerFrets);
+    const hasDoubleMarkers = parsedMarkerAssignments.assignments.some(
+      (assignment) => assignment.count === 2,
+    );
+
+    if (hasDoubleMarkers) {
       markerFields.push(["doubleMarkerSpacing", "Double marker spacing"]);
     }
 
@@ -444,23 +739,21 @@ function getValidationMessages(input: FormState, layout: Layout) {
       }
     }
 
-    const markerFrets = parseMarkerFrets(input.markerFrets);
-    const rawMarkerFrets = input.markerFrets
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    if (markerFrets.length === 0) {
-      errors.push("Enter at least one marker fret space.");
+    if (parsedMarkerAssignments.assignments.length === 0) {
+      errors.push("Choose at least one marker fret space.");
     }
 
-    if (markerFrets.length !== rawMarkerFrets.length) {
-      errors.push("Marker fret spaces must be whole numbers separated by commas.");
+    if (parsedMarkerAssignments.invalidTokens.length > 0) {
+      errors.push("Marker map entries must use whole fret numbers with 1 or 2 markers.");
     }
 
-    const invalidFrets = markerFrets.filter(
-      (fretSpace) => fretSpace < 1 || fretSpace > input.fretCount,
-    );
+    if (parsedMarkerAssignments.duplicateFrets.length > 0) {
+      errors.push("Each marker fret space can only be listed once.");
+    }
+
+    const invalidFrets = parsedMarkerAssignments.assignments
+      .map((assignment) => assignment.fretSpace)
+      .filter((fretSpace) => fretSpace < 1 || fretSpace > input.fretCount);
     if (invalidFrets.length > 0) {
       errors.push("Marker fret spaces must be between 1 and the number of frets.");
     }
@@ -471,7 +764,6 @@ function getValidationMessages(input: FormState, layout: Layout) {
 
     if (
       input.markerShape !== "dot" &&
-      input.markerShape !== "double-dot" &&
       Number(input.markerLength) <= Number(input.markerBitDiameter)
     ) {
       errors.push("Marker length must be larger than the marker bit diameter.");
@@ -490,7 +782,7 @@ function getValidationMessages(input: FormState, layout: Layout) {
 
     const markers = calculateMarkers(input, layout);
     const halfMarkerWidth =
-      input.markerShape === "double-dot"
+      hasDoubleMarkers
         ? Number(input.doubleMarkerSpacing) / 2 + Number(input.markerWidth) / 2
         : Number(input.markerWidth) / 2;
     const markerMaxOffset = Math.abs(Number(input.markerXOffset)) + halfMarkerWidth;
@@ -537,7 +829,7 @@ function addMarkerPocketGCode(
 ) {
   const stepOver = Math.max(Number(input.markerBitDiameter) * 0.65, 0.001);
 
-  if (input.markerShape === "dot" || input.markerShape === "double-dot") {
+  if (input.markerShape === "dot") {
     const maxRadius = Math.max(
       Number(input.markerWidth) / 2 - Number(input.markerBitDiameter) / 2,
       0,
@@ -601,7 +893,244 @@ function addMarkerPocketGCode(
   }
 }
 
-function generateGCode(input: FormState, layout: Layout) {
+function addMarkerOperationGCode(
+  lines: string[],
+  input: FormState,
+  layout: Layout,
+  markers: MarkerPocket[],
+  safeZ: number,
+  stopCurrentSpindle: boolean,
+) {
+  const markerPasses = Math.ceil(
+    Number(input.markerDepth) / Number(input.markerDepthPerPass),
+  );
+
+  lines.push(
+    "",
+    gCodeComment("Fretboard marker pocket operation"),
+    gCodeComment(`Marker shape: ${markerShapeLabel(input.markerShape)}`),
+    gCodeComment("Marker positions are centered in the numbered fret spaces."),
+    `G0 Z${formatNumber(safeZ)}`,
+  );
+
+  if (stopCurrentSpindle) {
+    lines.push("M5");
+  }
+
+  lines.push(`S${Math.round(Number(input.markerSpindleRpm))} M3`);
+
+  for (const marker of markers) {
+    lines.push(
+      "",
+      gCodeComment(
+        `Marker fret space ${marker.fretSpace}${
+          marker.markerCount === 2
+            ? ` ${marker.markerIndex} of ${marker.markerCount}`
+            : ""
+        } at X${formatNumber(marker.centerX)} Y${formatNumber(marker.y)}`,
+      ),
+    );
+
+    for (let pass = 1; pass <= markerPasses; pass += 1) {
+      const passDepth = Math.min(
+        pass * Number(input.markerDepthPerPass),
+        Number(input.markerDepth),
+      );
+      lines.push(
+        gCodeComment(`Marker pass ${pass} depth ${formatNumber(passDepth)} ${input.unit}`),
+      );
+      lines.push(`G0 Z${formatNumber(safeZ)}`);
+      addMarkerPocketGCode(lines, input, layout, marker, passDepth);
+    }
+  }
+}
+
+function pointDistance(start: Point, end: Point) {
+  return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+function interpolatePoint(start: Point, end: Point, ratio: number): Point {
+  return {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio,
+  };
+}
+
+function contourLength(points: Point[]) {
+  return points.reduce((total, point, index) => {
+    const nextPoint = points[(index + 1) % points.length];
+    return total + pointDistance(point, nextPoint);
+  }, 0);
+}
+
+function tabIntervals(points: Point[], input: FormState) {
+  if (!input.cutoutTabsEnabled) {
+    return [];
+  }
+
+  const length = contourLength(points);
+  const tabCount = Math.max(0, Math.round(Number(input.tabCount)));
+  const tabWidth = Number(input.tabWidth);
+
+  return Array.from({ length: tabCount }, (_, index) => {
+    const center = (length * (index + 0.5)) / tabCount;
+    return {
+      start: center - tabWidth / 2,
+      end: center + tabWidth / 2,
+    };
+  });
+}
+
+function distanceIsTabbed(
+  distanceAlongContour: number,
+  intervals: Array<{ start: number; end: number }>,
+) {
+  return intervals.some(
+    (interval) =>
+      distanceAlongContour >= interval.start && distanceAlongContour <= interval.end,
+  );
+}
+
+function addCutoutSegmentGCode(
+  lines: string[],
+  start: Point,
+  end: Point,
+  segmentStartDistance: number,
+  intervals: Array<{ start: number; end: number }>,
+  cutZ: number,
+  tabZ: number,
+  input: FormState,
+) {
+  const segmentLength = pointDistance(start, end);
+  const breakpoints = new Set<number>([0, segmentLength]);
+
+  for (const interval of intervals) {
+    const tabStart = interval.start - segmentStartDistance;
+    const tabEnd = interval.end - segmentStartDistance;
+
+    if (tabStart > 0 && tabStart < segmentLength) {
+      breakpoints.add(tabStart);
+    }
+
+    if (tabEnd > 0 && tabEnd < segmentLength) {
+      breakpoints.add(tabEnd);
+    }
+  }
+
+  const sortedBreakpoints = Array.from(breakpoints).sort((a, b) => a - b);
+
+  for (let index = 0; index < sortedBreakpoints.length - 1; index += 1) {
+    const fromDistance = sortedBreakpoints[index];
+    const toDistance = sortedBreakpoints[index + 1];
+    const midpoint = segmentStartDistance + (fromDistance + toDistance) / 2;
+    const desiredZ = distanceIsTabbed(midpoint, intervals) ? tabZ : cutZ;
+    const nextPoint = interpolatePoint(start, end, toDistance / segmentLength);
+
+    lines.push(`G1 Z${formatNumber(desiredZ)} F${formatNumber(input.cutoutPlungeRate)}`);
+    lines.push(
+      `G1 X${formatNumber(nextPoint.x)} Y${formatNumber(
+        nextPoint.y,
+      )} Z${formatNumber(desiredZ)} F${formatNumber(input.cutoutFeedRate)}`,
+    );
+  }
+}
+
+function generateCutoutGCode(
+  input: FormState,
+  layout: Layout,
+  extension: GCodeFileExtension,
+) {
+  const safeZ = input.unit === "mm" ? 5 : 0.2;
+  const outline = calculateFretboardOutline(input, layout);
+  const points = outline.cutterPath;
+  const passes = Math.ceil(Number(input.cutoutDepth) / Number(input.cutoutDepthPerPass));
+  const intervals = tabIntervals(points, input);
+  const tabProtectedDepth = Math.max(
+    Number(input.cutoutDepth) - Number(input.tabHeight),
+    0,
+  );
+  const lines: string[] = [
+    "%",
+    gCodeComment("Fretboard cutout G-code generated by Fret Slot CNC Builder"),
+    gCodeComment(`Program file: ${gCodeFilename(extension, "fretboard-cutout")}`),
+    gCodeComment(`Program type: ${gCodeFileTypeLabel(extension)}`),
+    gCodeComment(`Units: ${input.unit === "mm" ? "millimeters" : "inches"}`),
+    gCodeComment("Coordinate assumption: X0 Y0 is the lower-left front corner of the material."),
+    gCodeComment("Z0 is the top surface before cutting the blank outline."),
+    gCodeComment("Run this program before cutting fret slots or marker pockets."),
+    gCodeComment(`Final outline: nut width ${formatNumber(outline.nutWidth)} ${input.unit}, end width ${formatNumber(outline.endWidth)} ${input.unit}`),
+    gCodeComment(`Board length: ${formatNumber(outline.endY - outline.startY)} ${input.unit}`),
+    gCodeComment(`Cutout bit diameter: ${formatNumber(input.cutoutBitDiameter)} ${input.unit}`),
+    gCodeComment(`Cutout allowance: ${formatNumber(input.cutoutAllowance)} ${input.unit}`),
+    gCodeComment(`Material: ${formatNumber(input.materialWidth)} x ${formatNumber(
+      input.materialLength,
+    )} x ${formatNumber(input.materialThickness)} ${input.unit}`),
+    input.unit === "mm" ? "G21" : "G20",
+    "G90",
+    "G17",
+    "G94",
+    "G54",
+    `G0 Z${formatNumber(safeZ)}`,
+    `S${Math.round(Number(input.cutoutSpindleRpm))} M3`,
+  ];
+
+  if (input.cutoutTabsEnabled) {
+    lines.push(
+      gCodeComment(
+        `Tabs: ${Math.round(Number(input.tabCount))} at ${formatNumber(
+          input.tabWidth,
+        )} wide x ${formatNumber(input.tabHeight)} high`,
+      ),
+    );
+  } else {
+    lines.push(gCodeComment("Tabs disabled"));
+  }
+
+  for (let pass = 1; pass <= passes; pass += 1) {
+    const passDepth = Math.min(
+      pass * Number(input.cutoutDepthPerPass),
+      Number(input.cutoutDepth),
+    );
+    const cutZ = -passDepth;
+    const tabZ = input.cutoutTabsEnabled
+      ? -Math.min(passDepth, tabProtectedDepth)
+      : cutZ;
+    let segmentStartDistance = 0;
+
+    lines.push(
+      "",
+      gCodeComment(`Cutout pass ${pass} depth ${formatNumber(passDepth)} ${input.unit}`),
+      `G0 Z${formatNumber(safeZ)}`,
+      `G0 X${formatNumber(points[0].x)} Y${formatNumber(points[0].y)}`,
+      `G1 Z${formatNumber(cutZ)} F${formatNumber(input.cutoutPlungeRate)}`,
+    );
+
+    for (let index = 0; index < points.length; index += 1) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+      addCutoutSegmentGCode(
+        lines,
+        start,
+        end,
+        segmentStartDistance,
+        intervals,
+        cutZ,
+        tabZ,
+        input,
+      );
+      segmentStartDistance += pointDistance(start, end);
+    }
+  }
+
+  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  return lines.join("\n");
+}
+
+function generateGCode(
+  input: FormState,
+  layout: Layout,
+  extension: GCodeFileExtension,
+) {
   const safeZ = input.unit === "mm" ? 5 : 0.2;
   const plungeFeed = Math.max(input.feedRate * 0.45, input.unit === "mm" ? 25 : 1);
   const pointSpacing = input.unit === "mm" ? 1 : 0.04;
@@ -609,17 +1138,19 @@ function generateGCode(input: FormState, layout: Layout) {
   const markers = calculateMarkers(input, layout);
   const lines: string[] = [
     "%",
-    "(Fret slot G-code generated by Fret Slot CNC Builder)",
-    `(Units: ${input.unit === "mm" ? "millimeters" : "inches"})`,
-    "(Coordinate assumption: X0 Y0 is the lower-left front corner of the material.)",
-    "(Z0 is the fretboard top surface at the centerline before slot cutting.)",
-    "(Fret position formula: y = scaleLength * (1 - 2^(-fret/12)))",
-    "(String spread formula: spread = nutSpread + (bridgeSpread - nutSpread) * (y / scaleLength))",
-    "(Slot bottom formula: z = -slotDepth - (radius - sqrt(radius^2 - xOffset^2)))",
-    `(Material: ${formatNumber(input.materialWidth)} x ${formatNumber(
+    gCodeComment("Fret slot G-code generated by Fret Slot CNC Builder"),
+    gCodeComment(`Program file: ${gCodeFilename(extension, "fret-slots")}`),
+    gCodeComment(`Program type: ${gCodeFileTypeLabel(extension)}`),
+    gCodeComment(`Units: ${input.unit === "mm" ? "millimeters" : "inches"}`),
+    gCodeComment("Coordinate assumption: X0 Y0 is the lower-left front corner of the material."),
+    gCodeComment("Z0 is the fretboard top surface at the centerline before slot cutting."),
+    gCodeComment("Fret positions use the 12-tone equal temperament formula."),
+    gCodeComment("String spread is interpolated from nut spread to bridge spread."),
+    gCodeComment("Slot bottom follows the fretboard radius sagitta."),
+    gCodeComment(`Material: ${formatNumber(input.materialWidth)} x ${formatNumber(
       input.materialLength,
-    )} x ${formatNumber(input.materialThickness)} ${input.unit})`,
-    `(Bit diameter: ${formatNumber(input.bitDiameter)} ${input.unit})`,
+    )} x ${formatNumber(input.materialThickness)} ${input.unit}`),
+    gCodeComment(`Bit diameter: ${formatNumber(input.bitDiameter)} ${input.unit}`),
     input.unit === "mm" ? "G21" : "G20",
     "G90",
     "G17",
@@ -637,17 +1168,17 @@ function generateGCode(input: FormState, layout: Layout) {
 
     lines.push(
       "",
-      `(Fret ${slot.fret}: scale position ${formatNumber(
+      gCodeComment(`Fret ${slot.fret}: scale position ${formatNumber(
         slot.scalePosition,
-      )} ${input.unit}, Y ${formatNumber(slot.y)} ${input.unit})`,
-      `(Final slot length ${formatNumber(slot.slotLength)} ${input.unit}; cutter center X ${formatNumber(
+      )} ${input.unit}, Y ${formatNumber(slot.y)} ${input.unit}`),
+      gCodeComment(`Final slot length ${formatNumber(slot.slotLength)} ${input.unit}; cutter center X ${formatNumber(
         slot.startX,
-      )} to ${formatNumber(slot.endX)})`,
+      )} to ${formatNumber(slot.endX)}`),
     );
 
     for (let pass = 1; pass <= passes; pass += 1) {
       const passDepth = Math.min(pass * input.depthPerPass, input.slotDepth);
-      lines.push(`(Pass ${pass} depth ${formatNumber(passDepth)} ${input.unit})`);
+      lines.push(gCodeComment(`Pass ${pass} depth ${formatNumber(passDepth)} ${input.unit}`));
       lines.push(`G0 Z${formatNumber(safeZ)}`);
       lines.push(`G0 X${formatNumber(slot.startX)} Y${formatNumber(slot.y)}`);
       lines.push(
@@ -670,46 +1201,54 @@ function generateGCode(input: FormState, layout: Layout) {
   }
 
   if (input.markersEnabled && markers.length > 0) {
-    const markerPasses = Math.ceil(
-      Number(input.markerDepth) / Number(input.markerDepthPerPass),
-    );
-
-    lines.push(
-      "",
-      "(Fretboard marker pocket operation)",
-      `(Marker shape: ${markerShapeLabel(input.markerShape)})`,
-      `(Marker positions are centered in the numbered fret spaces.)`,
-      `G0 Z${formatNumber(safeZ)}`,
-      "M5",
-      `S${Math.round(Number(input.markerSpindleRpm))} M3`,
-    );
-
-    for (const marker of markers) {
-      lines.push(
-        "",
-        `(Marker fret space ${marker.fretSpace} at X${formatNumber(
-          marker.centerX,
-        )} Y${formatNumber(marker.y)})`,
-      );
-
-      for (let pass = 1; pass <= markerPasses; pass += 1) {
-        const passDepth = Math.min(
-          pass * Number(input.markerDepthPerPass),
-          Number(input.markerDepth),
-        );
-        lines.push(`(Marker pass ${pass} depth ${formatNumber(passDepth)} ${input.unit})`);
-        lines.push(`G0 Z${formatNumber(safeZ)}`);
-        addMarkerPocketGCode(lines, input, layout, marker, passDepth);
-      }
-    }
+    addMarkerOperationGCode(lines, input, layout, markers, safeZ, true);
   }
 
   lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
   return lines.join("\n");
 }
 
-async function saveGCode(gcode: string) {
+function generateMarkerGCode(
+  input: FormState,
+  layout: Layout,
+  extension: GCodeFileExtension,
+) {
+  const safeZ = input.unit === "mm" ? 5 : 0.2;
+  const markers = calculateMarkers(input, layout);
+  const lines: string[] = [
+    "%",
+    gCodeComment("Fretboard marker G-code generated by Fret Slot CNC Builder"),
+    gCodeComment(`Program file: ${gCodeFilename(extension, "fretboard-markers")}`),
+    gCodeComment(`Program type: ${gCodeFileTypeLabel(extension)}`),
+    gCodeComment(`Units: ${input.unit === "mm" ? "millimeters" : "inches"}`),
+    gCodeComment("Coordinate assumption: X0 Y0 is the lower-left front corner of the material."),
+    gCodeComment("Z0 is the fretboard top surface at the centerline before marker cutting."),
+    gCodeComment("Run this program after installing the marker cutter and setting work zero."),
+    gCodeComment(`Marker bit diameter: ${formatNumber(input.markerBitDiameter)} ${input.unit}`),
+    gCodeComment(`Material: ${formatNumber(input.materialWidth)} x ${formatNumber(
+      input.materialLength,
+    )} x ${formatNumber(input.materialThickness)} ${input.unit}`),
+    input.unit === "mm" ? "G21" : "G20",
+    "G90",
+    "G17",
+    "G94",
+    "G54",
+    `G0 Z${formatNumber(safeZ)}`,
+  ];
+
+  addMarkerOperationGCode(lines, input, layout, markers, safeZ, false);
+
+  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  return lines.join("\n");
+}
+
+async function saveGCode(
+  gcode: string,
+  extension: GCodeFileExtension,
+  program: GCodeProgram,
+) {
   const blob = new Blob([gcode], { type: "text/plain;charset=utf-8" });
+  const filename = gCodeFilename(extension, program);
   const savePicker = (
     window as unknown as {
       showSaveFilePicker?: (options: {
@@ -729,12 +1268,12 @@ async function saveGCode(gcode: string) {
 
   if (savePicker) {
     const handle = await savePicker({
-      suggestedName: "fret-slots.nc",
+      suggestedName: filename,
       types: [
         {
           description: "G-code file",
           accept: {
-            "text/plain": [".nc", ".gcode", ".tap"],
+            "text/plain": gCodeFileExtensions,
           },
         },
       ],
@@ -748,7 +1287,7 @@ async function saveGCode(gcode: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "fret-slots.nc";
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -757,6 +1296,8 @@ async function saveGCode(gcode: string) {
 
 const fieldGroups: Array<{
   title: string;
+  stepLabel: string;
+  summary: string;
   fields: Array<{
     key: keyof FormState;
     label: string;
@@ -766,6 +1307,8 @@ const fieldGroups: Array<{
 }> = [
   {
     title: "Scale And Frets",
+    stepLabel: "Setup",
+    summary: "Scale length and total fret count.",
     fields: [
       { key: "scaleLength", label: "Scale length", step: "0.001", min: "0" },
       { key: "fretCount", label: "Number of frets", step: "1", min: "1" },
@@ -773,6 +1316,8 @@ const fieldGroups: Array<{
   },
   {
     title: "Fretboard Layout",
+    stepLabel: "Shape",
+    summary: "String spread, board overhang, slot inset, and board-end margins.",
     fields: [
       {
         key: "nutStringSpread",
@@ -788,15 +1333,34 @@ const fieldGroups: Array<{
       },
       {
         key: "fretboardOverhang",
-        label: "Fretboard overhang",
+        label: "Fretboard overhang (each side)",
         step: "0.001",
         min: "0",
       },
-      { key: "fretInset", label: "Fret inset", step: "0.001", min: "0" },
+      {
+        key: "fretInset",
+        label: "Fret inset (each side)",
+        step: "0.001",
+        min: "0",
+      },
+      {
+        key: "nutEndMargin",
+        label: "Nut end margin",
+        step: "0.001",
+        min: "0",
+      },
+      {
+        key: "lastFretEndMargin",
+        label: "Last fret end margin",
+        step: "0.001",
+        min: "0",
+      },
     ],
   },
   {
     title: "Material",
+    stepLabel: "Blank",
+    summary: "Physical stock dimensions used for validation and preview.",
     fields: [
       { key: "materialWidth", label: "Material width", step: "0.001", min: "0" },
       {
@@ -815,6 +1379,8 @@ const fieldGroups: Array<{
   },
   {
     title: "Toolpath",
+    stepLabel: "Slots",
+    summary: "Fret-slot cutter, radius, depth, feed, and spindle settings.",
     fields: [
       { key: "bitDiameter", label: "Cutting bit diameter", step: "0.001", min: "0" },
       {
@@ -831,15 +1397,121 @@ const fieldGroups: Array<{
   },
 ];
 
+function CollapsiblePanel({
+  title,
+  stepLabel,
+  summary,
+  defaultOpen = true,
+  accent = "teal",
+  actions,
+  children,
+}: {
+  title: string;
+  stepLabel: string;
+  summary: string;
+  defaultOpen?: boolean;
+  accent?: "teal" | "blue" | "brown" | "slate";
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const accentClasses = {
+    teal: {
+      border: "border-l-[#19695f]",
+      badge: "bg-[#dcebe2] text-[#14544c]",
+      button: "text-[#14544c]",
+    },
+    blue: {
+      border: "border-l-[#2f5d7c]",
+      badge: "bg-[#e1ecf4] text-[#264c66]",
+      button: "text-[#264c66]",
+    },
+    brown: {
+      border: "border-l-[#8a4f1f]",
+      badge: "bg-[#f4e6d8] text-[#724018]",
+      button: "text-[#724018]",
+    },
+    slate: {
+      border: "border-l-[#60717b]",
+      badge: "bg-[#e8eef2] text-[#39474e]",
+      button: "text-[#39474e]",
+    },
+  }[accent];
+
+  return (
+    <section
+      className={`overflow-hidden rounded-lg border border-[#c7d1d8] border-l-4 ${accentClasses.border} bg-white shadow-sm`}
+    >
+      <div className="grid gap-3 border-b border-[#d6dde2] bg-[#f9fbfc] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+        <button
+          type="button"
+          className="grid min-w-0 gap-1 text-left"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <span
+            className={`w-fit rounded-[4px] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.12em] ${accentClasses.badge}`}
+          >
+            {stepLabel}
+          </span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-lg font-semibold text-[#1f2523]">{title}</span>
+            <span
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] border border-[#c7d1d8] bg-white text-sm font-bold ${accentClasses.button}`}
+              aria-hidden="true"
+            >
+              {isOpen ? "-" : "+"}
+            </span>
+          </span>
+          <span className="text-sm leading-snug text-[#53616a]">{summary}</span>
+        </button>
+        {actions ? <div className="sm:justify-self-end">{actions}</div> : null}
+      </div>
+      {isOpen ? <div className="p-3">{children}</div> : null}
+    </section>
+  );
+}
+
 export default function Home() {
   const [form, setForm] = useState<FormState>(defaultMetricState);
+  const [fileExtension, setFileExtension] =
+    useState<GCodeFileExtension>(".nc");
   const layout = useMemo(() => calculateLayout(form), [form]);
+  const fretboardOutline = useMemo(
+    () => calculateFretboardOutline(form, layout),
+    [form, layout],
+  );
+  const markerAssignments = useMemo(
+    () => parseMarkerAssignments(form.markerFrets).assignments,
+    [form.markerFrets],
+  );
+  const markerCountByFret = useMemo(
+    () =>
+      new Map(
+        markerAssignments.map((assignment) => [
+          assignment.fretSpace,
+          assignment.count,
+        ]),
+      ),
+    [markerAssignments],
+  );
   const markers = useMemo(() => calculateMarkers(form, layout), [form, layout]);
   const validation = useMemo(
     () => getValidationMessages(form, layout),
     [form, layout],
   );
-  const canGenerate = validation.errors.length === 0;
+  const fretValidation = useMemo(
+    () => getValidationMessages(form, layout, true, false),
+    [form, layout],
+  );
+  const cutoutValidation = useMemo(
+    () => getValidationMessages(form, layout, false, true),
+    [form, layout],
+  );
+  const canGenerate = fretValidation.errors.length === 0;
+  const canGenerateCutout = cutoutValidation.errors.length === 0;
+  const canGenerateMarkers =
+    canGenerate && form.markersEnabled && markers.length > 0;
 
   const preview = useMemo(() => {
     const width = 720;
@@ -886,7 +1558,10 @@ export default function Home() {
       }
 
       const numericValue =
-        key === "fretCount" || key === "spindleRpm"
+        key === "fretCount" ||
+        key === "spindleRpm" ||
+        key === "cutoutSpindleRpm" ||
+        key === "tabCount"
           ? Math.round(Number(value))
           : Number(value);
 
@@ -904,81 +1579,224 @@ export default function Home() {
     }));
   }
 
+  function updateMarkerCount(fretSpace: number, count: 0 | MarkerCount) {
+    setForm((current) => {
+      const assignments = parseMarkerAssignments(current.markerFrets).assignments
+        .filter((assignment) => assignment.fretSpace !== fretSpace);
+
+      if (count !== 0) {
+        assignments.push({ fretSpace, count });
+      }
+
+      return {
+        ...current,
+        markerFrets: formatMarkerAssignments(assignments),
+      };
+    });
+  }
+
   async function handleGenerate() {
     if (!canGenerate) {
       return;
     }
 
-    await saveGCode(generateGCode(form, layout));
+    await saveGCode(
+      generateGCode(form, layout, fileExtension),
+      fileExtension,
+      "fret-slots",
+    );
+  }
+
+  async function handleGenerateCutout() {
+    if (!canGenerateCutout) {
+      return;
+    }
+
+    await saveGCode(
+      generateCutoutGCode(form, layout, fileExtension),
+      fileExtension,
+      "fretboard-cutout",
+    );
+  }
+
+  async function handleGenerateMarkers() {
+    if (!canGenerateMarkers) {
+      return;
+    }
+
+    await saveGCode(
+      generateMarkerGCode(form, layout, fileExtension),
+      fileExtension,
+      "fretboard-markers",
+    );
   }
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-[#1f2523]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
         <section className="grid gap-5 lg:grid-cols-[minmax(330px,420px)_1fr]">
-          <div className="flex flex-col gap-4 rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[#8a4f1f]">
-                CNC fret slot generator
-              </p>
-              <h1 className="text-3xl font-semibold leading-tight text-[#1f2523]">
-                Radiused fret slot G-code
-              </h1>
-            </div>
+          <div className="flex flex-col gap-4">
+            <section className="rounded-lg border border-[#c7d1d8] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[#8a4f1f]">
+                  CNC fret slot generator
+                </p>
+                <h1 className="text-3xl font-semibold leading-tight text-[#1f2523]">
+                  Radiused fret slot G-code
+                </h1>
+              </div>
 
-            <div className="grid grid-cols-2 rounded-md border border-[#c7d1d8] bg-[#e8eef2] p-1">
-              {(["mm", "in"] as const).map((unit) => (
-                <button
-                  key={unit}
-                  type="button"
-                  className={`h-10 rounded-[4px] text-sm font-semibold transition ${
-                    form.unit === unit
-                      ? "bg-[#19695f] text-white shadow-sm"
-                      : "text-[#26302f] hover:bg-white/70"
-                  }`}
-                  onClick={() => updateField("unit", unit)}
-                >
-                  {unit === "mm" ? "Millimeters" : "Inches"}
-                </button>
-              ))}
-            </div>
+              <div className="mt-4 grid grid-cols-2 rounded-md border border-[#c7d1d8] bg-[#e8eef2] p-1">
+                {(["mm", "in"] as const).map((unit) => (
+                  <button
+                    key={unit}
+                    type="button"
+                    className={`h-10 rounded-[4px] text-sm font-semibold transition ${
+                      form.unit === unit
+                        ? "bg-[#19695f] text-white shadow-sm"
+                        : "text-[#26302f] hover:bg-white/70"
+                    }`}
+                    onClick={() => updateField("unit", unit)}
+                  >
+                    {unit === "mm" ? "Millimeters" : "Inches"}
+                  </button>
+                ))}
+              </div>
+            </section>
 
             <div className="grid gap-4">
-              {fieldGroups.map((group) => (
-                <fieldset
-                  key={group.title}
-                  className="grid gap-3 rounded-md border border-[#d6dde2] p-3"
-                >
-                  <legend className="px-1 text-sm font-semibold text-[#19695f]">
-                    {group.title}
-                  </legend>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                    {group.fields.map((field) => (
-                      <label
-                        key={field.key}
-                        className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      >
-                        <span>{field.label}</span>
-                        <input
-                          className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                          type="number"
-                          min={field.min}
-                          step={field.step}
-                          value={form[field.key] as string | number}
-                          onChange={(event) =>
-                            updateField(field.key, event.target.value)
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              ))}
+              <CollapsiblePanel
+                title="Fret Slot Setup"
+                stepLabel="Slots"
+                summary="Required inputs for fret positions, slot lengths, stock fit, and slot cutting."
+                accent="teal"
+              >
+                <div className="grid gap-3">
+                  {fieldGroups.map((group) => (
+                    <section
+                      key={group.title}
+                      className="overflow-hidden rounded-md border border-[#d6dde2] bg-[#f7fafb]"
+                    >
+                      <div className="border-b border-[#d6dde2] bg-white px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-[4px] bg-[#e8eef2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#53616a]">
+                            {group.stepLabel}
+                          </span>
+                          <h3 className="text-sm font-semibold text-[#1f2523]">
+                            {group.title}
+                          </h3>
+                        </div>
+                        <p className="mt-1 text-xs leading-snug text-[#53616a]">
+                          {group.summary}
+                        </p>
+                      </div>
+                      <div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                        {group.fields.map((field) => (
+                          <label
+                            key={field.key}
+                            className="grid gap-1 text-sm font-medium text-[#26302f]"
+                          >
+                            <span>{field.label}</span>
+                            <input
+                              className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+                              type="number"
+                              min={field.min}
+                              step={field.step}
+                              value={form[field.key] as string | number}
+                              onChange={(event) =>
+                                updateField(field.key, event.target.value)
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </CollapsiblePanel>
 
-              <fieldset className="grid gap-3 rounded-md border border-[#d6dde2] p-3">
-                <legend className="px-1 text-sm font-semibold text-[#19695f]">
-                  Fretboard Markers
-                </legend>
+              <CollapsiblePanel
+                title="Fretboard Cutout"
+                stepLabel="Cut First"
+                summary="Profile the blank outline before fret slots or marker pockets."
+                accent="blue"
+              >
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {[
+                    ["cutoutBitDiameter", "Cutout bit diameter"],
+                    ["cutoutDepth", "Cutout depth"],
+                    ["cutoutDepthPerPass", "Depth per pass"],
+                    ["cutoutFeedRate", "Feed rate"],
+                    ["cutoutPlungeRate", "Plunge rate"],
+                    ["cutoutSpindleRpm", "Spindle RPM"],
+                    ["cutoutAllowance", "Outside allowance"],
+                  ].map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="grid gap-1 text-sm font-medium text-[#26302f]"
+                    >
+                      <span>{label}</span>
+                      <input
+                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+                        type="number"
+                        min={key === "cutoutAllowance" ? "0" : "0.001"}
+                        step={key === "cutoutSpindleRpm" ? "1" : "0.001"}
+                        value={form[key as keyof FormState] as string | number}
+                        onChange={(event) =>
+                          updateField(key as keyof FormState, event.target.value)
+                        }
+                      />
+                    </label>
+                  ))}
+
+                  <label className="flex items-center gap-2 text-sm font-semibold text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                    <input
+                      className="h-4 w-4 accent-[#19695f]"
+                      type="checkbox"
+                      checked={form.cutoutTabsEnabled}
+                      onChange={(event) =>
+                        updateBooleanField(
+                          "cutoutTabsEnabled",
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    Leave holding tabs
+                  </label>
+
+                  {[
+                    ["tabCount", "Tab count"],
+                    ["tabWidth", "Tab width"],
+                    ["tabHeight", "Tab height"],
+                  ].map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="grid gap-1 text-sm font-medium text-[#26302f]"
+                    >
+                      <span>{label}</span>
+                      <input
+                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20 disabled:bg-[#eef2f4] disabled:text-[#77838a]"
+                        type="number"
+                        min="0"
+                        step={key === "tabCount" ? "1" : "0.001"}
+                        disabled={!form.cutoutTabsEnabled}
+                        value={form[key as keyof FormState] as string | number}
+                        onChange={(event) =>
+                          updateField(key as keyof FormState, event.target.value)
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel
+                title="Fretboard Markers"
+                stepLabel="Details"
+                summary="Configure marker pockets and choose single or double markers by fret space."
+                accent="brown"
+                defaultOpen={false}
+              >
                 <label className="flex items-center gap-2 text-sm font-semibold text-[#26302f]">
                   <input
                     className="h-4 w-4 accent-[#19695f]"
@@ -1002,15 +1820,14 @@ export default function Home() {
                       }
                     >
                       <option value="dot">Dot</option>
-                      <option value="double-dot">Double dot</option>
                       <option value="rectangle">Rectangle</option>
                       <option value="diamond">Diamond</option>
                       <option value="trapezoid">Trapezoid</option>
                     </select>
                   </label>
 
-                  <label className="grid gap-1 text-sm font-medium text-[#26302f]">
-                    <span>Fret spaces</span>
+                  <label className="grid gap-1 text-sm font-medium text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                    <span>Marker map</span>
                     <input
                       className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                       type="text"
@@ -1020,6 +1837,46 @@ export default function Home() {
                       }
                     />
                   </label>
+
+                  <div className="grid gap-2 sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                    <div className="text-sm font-semibold text-[#26302f]">
+                      Fret space markers
+                    </div>
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(92px,1fr))] gap-2">
+                      {Array.from({ length: Math.max(form.fretCount, 0) }, (_, index) => {
+                        const fretSpace = index + 1;
+                        const selectedCount = markerCountByFret.get(fretSpace) ?? 0;
+
+                        return (
+                          <div
+                            key={fretSpace}
+                            className="grid gap-1 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-2"
+                          >
+                            <div className="text-xs font-semibold uppercase text-[#53616a]">
+                              Fret {fretSpace}
+                            </div>
+                            <div className="grid grid-cols-3 rounded-[4px] border border-[#c7d1d8] bg-[#e8eef2] p-0.5">
+                              {([0, 1, 2] as const).map((count) => (
+                                <button
+                                  key={count}
+                                  type="button"
+                                  aria-pressed={selectedCount === count}
+                                  className={`h-8 rounded-[3px] text-xs font-semibold transition ${
+                                    selectedCount === count
+                                      ? "bg-[#19695f] text-white shadow-sm"
+                                      : "text-[#26302f] hover:bg-white/80"
+                                  }`}
+                                  onClick={() => updateMarkerCount(fretSpace, count)}
+                                >
+                                  {count === 0 ? "Off" : count}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
 
                   {[
                     ["markerWidth", "Marker width"],
@@ -1051,26 +1908,22 @@ export default function Home() {
                     </label>
                   ))}
                 </div>
-              </fieldset>
+              </CollapsiblePanel>
             </div>
           </div>
 
           <div className="flex min-w-0 flex-col gap-5">
-            <section className="rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-              <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-[#1f2523]">
-                    Material And Slot Preview
-                  </h2>
-                  <p className="text-sm text-[#53616a]">
-                    X runs across material width. Y runs along material length.
-                  </p>
-                </div>
-                <div className="text-sm font-medium text-[#53616a]">
+            <CollapsiblePanel
+              title="Cutout And Slot Preview"
+              stepLabel="Preview"
+              summary="Visual check for material, board outline, cutter path, frets, and markers."
+              accent="slate"
+              actions={
+                <div className="text-sm font-semibold text-[#53616a]">
                   Origin X0 Y0: lower-left front corner
                 </div>
-              </div>
-
+              }
+            >
               <svg
                 className="h-auto w-full rounded-md border border-[#d6dde2] bg-[#f7fafb]"
                 viewBox={`0 0 ${preview.width} ${preview.height}`}
@@ -1085,6 +1938,41 @@ export default function Home() {
                   fill="#e9eef2"
                   stroke="#60717b"
                   strokeWidth="2"
+                />
+                <polygon
+                  points={fretboardOutline.points
+                    .map(
+                      (point) =>
+                        `${svgNumber(
+                          preview.originX + point.x * preview.scaleX,
+                        )},${svgNumber(
+                          preview.originY +
+                            preview.drawingHeight -
+                            point.y * preview.scaleY,
+                        )}`,
+                    )
+                    .join(" ")}
+                  fill="#dcebe2"
+                  stroke="#19695f"
+                  strokeWidth="2"
+                />
+                <polygon
+                  points={fretboardOutline.cutterPath
+                    .map(
+                      (point) =>
+                        `${svgNumber(
+                          preview.originX + point.x * preview.scaleX,
+                        )},${svgNumber(
+                          preview.originY +
+                            preview.drawingHeight -
+                            point.y * preview.scaleY,
+                        )}`,
+                    )
+                    .join(" ")}
+                  fill="none"
+                  stroke="#1f2523"
+                  strokeDasharray="5 5"
+                  strokeWidth="1.5"
                 />
                 <line
                   x1={svgNumber(preview.originX + preview.drawingWidth / 2)}
@@ -1136,7 +2024,7 @@ export default function Home() {
                   />
                 ))}
                 {markers.map((marker) =>
-                  marker.shape === "dot" || marker.shape === "double-dot" ? (
+                  marker.shape === "dot" ? (
                     <circle
                       key={marker.id}
                       cx={svgNumber(preview.originX + marker.centerX * preview.scaleX)}
@@ -1190,53 +2078,92 @@ export default function Home() {
                   X0 Y0
                 </text>
               </svg>
-            </section>
+            </CollapsiblePanel>
 
-            <section className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-                <div className="text-sm font-medium text-[#53616a]">
-                  Fret Formula
+            <CollapsiblePanel
+              title="Layout Summary"
+              stepLabel="Check"
+              summary="Key calculated values before exporting any machine files."
+              accent="teal"
+            >
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
+                  <div className="text-sm font-medium text-[#53616a]">
+                    Fret Formula
+                  </div>
+                  <div className="mt-2 font-mono text-sm text-[#1f2523]">
+                    y = L * (1 - 2^(-n/12))
+                  </div>
                 </div>
-                <div className="mt-2 font-mono text-sm text-[#1f2523]">
-                  y = L * (1 - 2^(-n/12))
+                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
+                  <div className="text-sm font-medium text-[#53616a]">
+                    Widest Fretboard
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {numberFormatter.format(layout.maxFretboardWidth)} {form.unit}
+                  </div>
+                </div>
+                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
+                  <div className="text-sm font-medium text-[#53616a]">
+                    Layout Offset
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {numberFormatter.format(layout.nutY)} {form.unit}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-                <div className="text-sm font-medium text-[#53616a]">
-                  Widest Fretboard
-                </div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {numberFormatter.format(layout.maxFretboardWidth)} {form.unit}
-                </div>
-              </div>
-              <div className="rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-                <div className="text-sm font-medium text-[#53616a]">
-                  Layout Offset
-                </div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {numberFormatter.format(layout.nutY)} {form.unit}
-                </div>
-              </div>
-            </section>
+            </CollapsiblePanel>
 
-            <section className="rounded-lg border border-[#d6dde2] bg-[#ffffff] p-4 shadow-sm">
-              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-[#1f2523]">
-                    Calculated Frets
-                  </h2>
-                  <p className="text-sm text-[#53616a]">
-                    Cutter-center coordinates compensate for bit radius at slot ends.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="h-11 rounded-md bg-[#19695f] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
-                  disabled={!canGenerate}
-                  onClick={handleGenerate}
+            <CollapsiblePanel
+              title="Calculated Frets And Files"
+              stepLabel="Export"
+              summary="Review cutter-center fret coordinates and download each operation as its own file."
+              accent="blue"
+            >
+              <div className="mb-4 flex w-full flex-col gap-2 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3 sm:flex-row sm:items-stretch">
+                <label className="sr-only" htmlFor="gcode-file-extension">
+                  G-code file format
+                </label>
+                <select
+                  id="gcode-file-extension"
+                  className="h-11 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm font-semibold text-[#26302f] outline-none transition focus:z-10 focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20 sm:rounded-r-none"
+                  value={fileExtension}
+                  onChange={(event) =>
+                    setFileExtension(event.target.value as GCodeFileExtension)
+                  }
                 >
-                  Generate G-Code
-                </button>
+                  {gCodeFileExtensions.map((extension) => (
+                    <option key={extension} value={extension}>
+                      {extension}
+                    </option>
+                  ))}
+                </select>
+                <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-0">
+                  <button
+                    type="button"
+                    className="h-11 rounded-md bg-[#2f5d7c] px-4 text-sm font-semibold text-white transition hover:bg-[#264c66] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
+                    disabled={!canGenerateCutout}
+                    onClick={handleGenerateCutout}
+                  >
+                    Cutout Only
+                  </button>
+                  <button
+                    type="button"
+                    className="h-11 rounded-md bg-[#19695f] px-4 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
+                    disabled={!canGenerate}
+                    onClick={handleGenerate}
+                  >
+                    {form.markersEnabled ? "Frets + Markers" : "Fret Slots"}
+                  </button>
+                  <button
+                    type="button"
+                    className="h-11 rounded-md bg-[#8a4f1f] px-4 text-sm font-semibold text-white transition hover:bg-[#724018] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-l-none"
+                    disabled={!canGenerateMarkers}
+                    onClick={handleGenerateMarkers}
+                  >
+                    Markers Only
+                  </button>
+                </div>
               </div>
 
               {(validation.errors.length > 0 || validation.warnings.length > 0) && (
@@ -1300,7 +2227,7 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
-            </section>
+            </CollapsiblePanel>
           </div>
         </section>
       </div>
