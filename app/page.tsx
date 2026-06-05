@@ -2589,57 +2589,160 @@ export default function Home() {
               summary="Review cutter-center fret coordinates and download each operation as its own file."
               accent="blue"
             >
-              <div className="mb-4 flex w-full flex-col gap-2 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3 sm:flex-row sm:items-stretch">
-                <label className="sr-only" htmlFor="gcode-file-extension">
-                  G-code file format
-                </label>
-                <select
-                  id="gcode-file-extension"
-                  className="h-11 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm font-semibold text-[#26302f] outline-none transition focus:z-10 focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20 sm:rounded-r-none"
-                  value={fileExtension}
-                  onChange={(event) =>
-                    setFileExtension(event.target.value as GCodeFileExtension)
-                  }
-                >
-                  {gCodeFileExtensions.map((extension) => (
-                    <option key={extension} value={extension}>
-                      {extension}
-                    </option>
-                  ))}
-                </select>
-                <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-4 sm:gap-0">
-                  <button
-                    type="button"
-                    className="h-11 rounded-md bg-[#60717b] px-4 text-sm font-semibold text-white transition hover:bg-[#39474e] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
-                    disabled={!canGenerateRadius}
-                    onClick={handleGenerateRadius}
+              <div className="mb-4 grid gap-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
+                <div className="grid gap-2 sm:grid-cols-[220px_1fr] sm:items-end">
+                  <label
+                    className="grid gap-1 text-sm font-semibold text-[#26302f]"
+                    htmlFor="gcode-file-extension"
                   >
-                    Radius Top
-                  </button>
-                  <button
-                    type="button"
-                    className="h-11 rounded-md bg-[#2f5d7c] px-4 text-sm font-semibold text-white transition hover:bg-[#264c66] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
-                    disabled={!canGenerateCutout}
-                    onClick={handleGenerateCutout}
-                  >
-                    Cutout Only
-                  </button>
-                  <button
-                    type="button"
-                    className="h-11 rounded-md bg-[#19695f] px-4 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
-                    disabled={!canGenerate}
-                    onClick={handleGenerate}
-                  >
-                    {form.markersEnabled ? "Frets + Markers" : "Fret Slots"}
-                  </button>
-                  <button
-                    type="button"
-                    className="h-11 rounded-md bg-[#8a4f1f] px-4 text-sm font-semibold text-white transition hover:bg-[#724018] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-l-none"
-                    disabled={!canGenerateMarkers}
-                    onClick={handleGenerateMarkers}
-                  >
-                    Markers Only
-                  </button>
+                    <span>Downloaded file extension</span>
+                    <select
+                      id="gcode-file-extension"
+                      className="h-11 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm font-semibold text-[#26302f] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+                      value={fileExtension}
+                      onChange={(event) =>
+                        setFileExtension(event.target.value as GCodeFileExtension)
+                      }
+                    >
+                      {gCodeFileExtensions.map((extension) => (
+                        <option key={extension} value={extension}>
+                          {extension}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="rounded-md border border-[#d6dde2] bg-white px-3 py-2 text-sm leading-snug text-[#53616a]">
+                    Export only the operation you plan to run. Each button downloads a separate
+                    G-code file using the shared board setup plus that operation&apos;s own settings.
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-[4px] bg-[#e8eef2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#39474e]">
+                        Surface
+                      </span>
+                      <span className={`text-xs font-bold ${canGenerateRadius ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
+                        {canGenerateRadius ? "Ready" : "Needs input"}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1f2523]">
+                        Radius the fretboard top
+                      </h3>
+                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
+                        Cuts the curved top surface to the selected fretboard radius.
+                      </p>
+                    </div>
+                    <div className="font-mono text-xs text-[#53616a]">
+                      {gCodeFilename(fileExtension, "fretboard-radius")}
+                    </div>
+                    <button
+                      type="button"
+                      className="h-11 rounded-md bg-[#60717b] px-3 text-sm font-semibold text-white transition hover:bg-[#39474e] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+                      disabled={!canGenerateRadius}
+                      onClick={handleGenerateRadius}
+                    >
+                      Download Radius Top G-code
+                    </button>
+                  </section>
+
+                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-[4px] bg-[#e1ecf4] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#264c66]">
+                        Cutout
+                      </span>
+                      <span className={`text-xs font-bold ${canGenerateCutout ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
+                        {canGenerateCutout ? "Ready" : "Needs input"}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1f2523]">
+                        Cut the fretboard outline
+                      </h3>
+                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
+                        Profiles the tapered board shape with optional holding tabs.
+                      </p>
+                    </div>
+                    <div className="font-mono text-xs text-[#53616a]">
+                      {gCodeFilename(fileExtension, "fretboard-cutout")}
+                    </div>
+                    <button
+                      type="button"
+                      className="h-11 rounded-md bg-[#2f5d7c] px-3 text-sm font-semibold text-white transition hover:bg-[#264c66] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+                      disabled={!canGenerateCutout}
+                      onClick={handleGenerateCutout}
+                    >
+                      Download Cutout G-code
+                    </button>
+                  </section>
+
+                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-[4px] bg-[#dcebe2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#14544c]">
+                        Slots
+                      </span>
+                      <span className={`text-xs font-bold ${canGenerate ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
+                        {canGenerate ? "Ready" : "Needs input"}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1f2523]">
+                        {form.markersEnabled
+                          ? "Cut fret slots and marker pockets"
+                          : "Cut fret slots"}
+                      </h3>
+                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
+                        {form.markersEnabled
+                          ? "Cuts radiused fret slots, then marker pockets in the same file."
+                          : "Cuts fret slots with slot bottoms matching the selected radius."}
+                      </p>
+                    </div>
+                    <div className="font-mono text-xs text-[#53616a]">
+                      {gCodeFilename(fileExtension, "fret-slots")}
+                    </div>
+                    <button
+                      type="button"
+                      className="h-11 rounded-md bg-[#19695f] px-3 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+                      disabled={!canGenerate}
+                      onClick={handleGenerate}
+                    >
+                      {form.markersEnabled
+                        ? "Download Slots + Markers G-code"
+                        : "Download Fret Slots G-code"}
+                    </button>
+                  </section>
+
+                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-[4px] bg-[#f4e6d8] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#724018]">
+                        Markers
+                      </span>
+                      <span className={`text-xs font-bold ${canGenerateMarkers ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
+                        {canGenerateMarkers ? "Ready" : "Needs input"}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1f2523]">
+                        Cut marker pockets only
+                      </h3>
+                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
+                        Cuts only the selected dot or inlay pockets, with no fret-slot moves.
+                      </p>
+                    </div>
+                    <div className="font-mono text-xs text-[#53616a]">
+                      {gCodeFilename(fileExtension, "fretboard-markers")}
+                    </div>
+                    <button
+                      type="button"
+                      className="h-11 rounded-md bg-[#8a4f1f] px-3 text-sm font-semibold text-white transition hover:bg-[#724018] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+                      disabled={!canGenerateMarkers}
+                      onClick={handleGenerateMarkers}
+                    >
+                      Download Marker Pockets G-code
+                    </button>
+                  </section>
                 </div>
               </div>
 
