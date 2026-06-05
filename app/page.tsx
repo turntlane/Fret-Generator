@@ -7,7 +7,11 @@ type Unit = "mm" | "in";
 type MarkerShape = "dot" | "rectangle" | "diamond" | "trapezoid";
 type MarkerCount = 1 | 2;
 type GCodeFileExtension = ".nc" | ".gcode" | ".tap" | ".cnc" | ".ngc";
-type GCodeProgram = "fret-slots" | "fretboard-markers" | "fretboard-cutout";
+type GCodeProgram =
+  | "fret-slots"
+  | "fretboard-markers"
+  | "fretboard-cutout"
+  | "fretboard-radius";
 
 type FormState = {
   unit: Unit;
@@ -28,6 +32,12 @@ type FormState = {
   feedRate: number;
   depthPerPass: number;
   spindleRpm: number;
+  radiusBitDiameter: number;
+  radiusStepOver: number;
+  radiusDepthPerPass: number;
+  radiusFeedRate: number;
+  radiusPlungeRate: number;
+  radiusSpindleRpm: number;
   cutoutBitDiameter: number;
   cutoutDepth: number;
   cutoutDepthPerPass: number;
@@ -128,6 +138,12 @@ const defaultMetricState: FormState = {
   feedRate: 300,
   depthPerPass: 0.3,
   spindleRpm: 18000,
+  radiusBitDiameter: 6.35,
+  radiusStepOver: 1.5,
+  radiusDepthPerPass: 0.4,
+  radiusFeedRate: 500,
+  radiusPlungeRate: 120,
+  radiusSpindleRpm: 18000,
   cutoutBitDiameter: 3.175,
   cutoutDepth: 8,
   cutoutDepthPerPass: 1,
@@ -178,6 +194,11 @@ const linearInputKeys: Array<keyof FormState> = [
   "fretboardRadius",
   "slotDepth",
   "depthPerPass",
+  "radiusBitDiameter",
+  "radiusStepOver",
+  "radiusDepthPerPass",
+  "radiusFeedRate",
+  "radiusPlungeRate",
   "cutoutBitDiameter",
   "cutoutDepth",
   "cutoutDepthPerPass",
@@ -354,6 +375,23 @@ function calculateFretboardOutline(
     points,
     cutterPath,
   };
+}
+
+function fretboardOutlineWidthAtY(outline: FretboardOutline, y: number) {
+  const ratio = clamp(
+    (y - outline.startY) / Math.max(outline.endY - outline.startY, 0.000001),
+    0,
+    1,
+  );
+  return outline.nutWidth + (outline.endWidth - outline.nutWidth) * ratio;
+}
+
+function radiusSagitta(input: FormState, layout: Layout, x: number) {
+  const xFromCenter = x - layout.centerX;
+  return (
+    input.fretboardRadius -
+    Math.sqrt(input.fretboardRadius ** 2 - xFromCenter ** 2)
+  );
 }
 
 function parseMarkerAssignments(value: string): ParsedMarkerAssignments {
@@ -547,6 +585,8 @@ function getValidationMessages(
   layout: Layout,
   includeMarkers = true,
   includeCutout = true,
+  includeRadius = false,
+  includeSlots = true,
 ) {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -558,13 +598,19 @@ function getValidationMessages(
     ["materialWidth", "Material width"],
     ["materialLength", "Material length"],
     ["materialThickness", "Material thickness"],
-    ["bitDiameter", "Bit diameter"],
     ["fretboardRadius", "Fretboard radius"],
-    ["slotDepth", "Slot depth"],
-    ["feedRate", "Feed rate"],
-    ["depthPerPass", "Depth per pass"],
-    ["spindleRpm", "Spindle RPM"],
   ];
+
+  if (includeSlots) {
+    positiveFields.push(
+      ["fretInset", "Fret inset"],
+      ["bitDiameter", "Bit diameter"],
+      ["slotDepth", "Slot depth"],
+      ["feedRate", "Feed rate"],
+      ["depthPerPass", "Depth per pass"],
+      ["spindleRpm", "Spindle RPM"],
+    );
+  }
 
   if (includeCutout) {
     positiveFields.push(
@@ -574,6 +620,17 @@ function getValidationMessages(
       ["cutoutFeedRate", "Cutout feed rate"],
       ["cutoutPlungeRate", "Cutout plunge rate"],
       ["cutoutSpindleRpm", "Cutout spindle RPM"],
+    );
+  }
+
+  if (includeRadius) {
+    positiveFields.push(
+      ["radiusBitDiameter", "Radiusing bit diameter"],
+      ["radiusStepOver", "Radiusing step-over"],
+      ["radiusDepthPerPass", "Radiusing depth per pass"],
+      ["radiusFeedRate", "Radiusing feed rate"],
+      ["radiusPlungeRate", "Radiusing plunge rate"],
+      ["radiusSpindleRpm", "Radiusing spindle RPM"],
     );
   }
 
@@ -591,10 +648,6 @@ function getValidationMessages(
     warnings.push("More than 36 frets will generate a large, unusual program.");
   }
 
-  if (input.fretInset < 0) {
-    errors.push("Fret inset cannot be negative.");
-  }
-
   if (layout.nutY < 0) {
     errors.push("The calculated fret layout is longer than the material.");
   }
@@ -603,28 +656,34 @@ function getValidationMessages(
     errors.push("The calculated fretboard is wider than the material.");
   }
 
-  const shortestSlot = layout.slots.reduce(
-    (shortest, slot) => Math.min(shortest, slot.slotLength),
-    Number.POSITIVE_INFINITY,
-  );
-  if (shortestSlot <= input.bitDiameter) {
-    errors.push("Fret inset leaves no room for the cutter inside the slot ends.");
-  }
+  if (includeSlots) {
+    if (input.fretInset < 0) {
+      errors.push("Fret inset cannot be negative.");
+    }
 
-  const largestToolOffset = layout.slots.reduce((largest, slot) => {
-    return Math.max(
-      largest,
-      Math.abs(slot.startX - layout.centerX),
-      Math.abs(slot.endX - layout.centerX),
+    const shortestSlot = layout.slots.reduce(
+      (shortest, slot) => Math.min(shortest, slot.slotLength),
+      Number.POSITIVE_INFINITY,
     );
-  }, 0);
+    if (shortestSlot <= input.bitDiameter) {
+      errors.push("Fret inset leaves no room for the cutter inside the slot ends.");
+    }
 
-  if (largestToolOffset >= input.fretboardRadius) {
-    errors.push("Fretboard radius must be larger than the widest slot half-span.");
-  }
+    const largestToolOffset = layout.slots.reduce((largest, slot) => {
+      return Math.max(
+        largest,
+        Math.abs(slot.startX - layout.centerX),
+        Math.abs(slot.endX - layout.centerX),
+      );
+    }, 0);
 
-  if (input.slotDepth >= input.materialThickness) {
-    warnings.push("Slot depth is equal to or deeper than the material thickness.");
+    if (largestToolOffset >= input.fretboardRadius) {
+      errors.push("Fretboard radius must be larger than the widest slot half-span.");
+    }
+
+    if (input.slotDepth >= input.materialThickness) {
+      warnings.push("Slot depth is equal to or deeper than the material thickness.");
+    }
   }
 
   if (includeCutout) {
@@ -702,6 +761,59 @@ function getValidationMessages(
       if (Number(input.tabHeight) >= Number(input.cutoutDepth)) {
         errors.push("Tab height must be smaller than cutout depth.");
       }
+    }
+  }
+
+  if (includeRadius) {
+    const outline = calculateFretboardOutline(input, layout);
+    const toolRadius = Number(input.radiusBitDiameter) / 2;
+    const narrowestWidth = Math.min(outline.nutWidth, outline.endWidth);
+    const widestCenterSpan = Math.max(outline.nutWidth, outline.endWidth) / 2 - toolRadius;
+    const maxSurfaceDepth =
+      widestCenterSpan > 0
+        ? radiusSagitta(input, layout, layout.centerX + widestCenterSpan)
+        : 0;
+
+    if (!includeCutout) {
+      if (outline.startY < 0) {
+        errors.push("Nut end margin places the radiusing area before the material.");
+      }
+
+      if (outline.endY > Number(input.materialLength)) {
+        errors.push("Last fret end margin places the radiusing area beyond the material.");
+      }
+
+      if (
+        outline.points.some(
+          (point) =>
+            point.x < 0 ||
+            point.x > Number(input.materialWidth) ||
+            point.y < 0 ||
+            point.y > Number(input.materialLength),
+        )
+      ) {
+        errors.push("Radiusing area extends beyond the material.");
+      }
+    }
+
+    if (Number(input.radiusBitDiameter) >= narrowestWidth) {
+      errors.push("Radiusing bit diameter must be smaller than the narrowest fretboard width.");
+    }
+
+    if (widestCenterSpan <= 0) {
+      errors.push("Radiusing bit leaves no cutter-center travel inside the fretboard outline.");
+    }
+
+    if (widestCenterSpan >= Number(input.fretboardRadius)) {
+      errors.push("Fretboard radius must be larger than the widest radiusing cutter-center half-span.");
+    }
+
+    if (Number(input.radiusStepOver) > Number(input.radiusBitDiameter)) {
+      warnings.push("Radiusing step-over is larger than the cutter diameter and may leave ridges.");
+    }
+
+    if (maxSurfaceDepth >= Number(input.materialThickness)) {
+      warnings.push("Fretboard radius edge removal is equal to or deeper than the material thickness.");
     }
   }
 
@@ -806,11 +918,7 @@ function getValidationMessages(
 }
 
 function zForRadius(input: FormState, layout: Layout, x: number, passDepth: number) {
-  const xFromCenter = x - layout.centerX;
-  const sagitta =
-    input.fretboardRadius -
-    Math.sqrt(input.fretboardRadius ** 2 - xFromCenter ** 2);
-  return -(passDepth + sagitta);
+  return -(passDepth + radiusSagitta(input, layout, x));
 }
 
 function markerShapeLabel(shape: MarkerShape) {
@@ -1033,6 +1141,109 @@ function addCutoutSegmentGCode(
       )} Z${formatNumber(desiredZ)} F${formatNumber(input.cutoutFeedRate)}`,
     );
   }
+}
+
+function generateRadiusGCode(
+  input: FormState,
+  layout: Layout,
+  extension: GCodeFileExtension,
+) {
+  const safeZ = input.unit === "mm" ? 5 : 0.2;
+  const outline = calculateFretboardOutline(input, layout);
+  const toolRadius = Number(input.radiusBitDiameter) / 2;
+  const yStep = Math.max(Number(input.radiusStepOver), 0.001);
+  const pointSpacing = input.unit === "mm" ? 1 : 0.04;
+  const widestCenterHalfSpan =
+    Math.max(outline.nutWidth, outline.endWidth) / 2 - toolRadius;
+  const maxSurfaceDepth = radiusSagitta(
+    input,
+    layout,
+    layout.centerX + Math.max(widestCenterHalfSpan, 0),
+  );
+  const passes = Math.max(
+    1,
+    Math.ceil(maxSurfaceDepth / Number(input.radiusDepthPerPass)),
+  );
+  const rowCount = Math.max(
+    1,
+    Math.ceil((outline.endY - outline.startY) / yStep),
+  );
+  const lines: string[] = [
+    "%",
+    gCodeComment("Fretboard radius G-code generated by Fret Slot CNC Builder"),
+    gCodeComment(`Program file: ${gCodeFilename(extension, "fretboard-radius")}`),
+    gCodeComment(`Program type: ${gCodeFileTypeLabel(extension)}`),
+    gCodeComment(`Units: ${input.unit === "mm" ? "millimeters" : "inches"}`),
+    gCodeComment("Coordinate assumption: X0 Y0 is the lower-left front corner of the material."),
+    gCodeComment("Z0 is the flat top surface at the fretboard centerline before radiusing."),
+    gCodeComment("Final centerline remains at Z0 and the edges are cut down by the radius sagitta."),
+    gCodeComment("Run this program before cutting fret slots or marker pockets."),
+    gCodeComment(`Fretboard top radius: ${formatNumber(input.fretboardRadius)} ${input.unit}`),
+    gCodeComment(`Maximum edge removal: ${formatNumber(maxSurfaceDepth)} ${input.unit}`),
+    gCodeComment(`Radiusing bit diameter: ${formatNumber(input.radiusBitDiameter)} ${input.unit}`),
+    gCodeComment(`Step-over: ${formatNumber(input.radiusStepOver)} ${input.unit}`),
+    input.unit === "mm" ? "G21" : "G20",
+    "G90",
+    "G17",
+    "G94",
+    "G54",
+    `G0 Z${formatNumber(safeZ)}`,
+    `S${Math.round(Number(input.radiusSpindleRpm))} M3`,
+  ];
+
+  for (let pass = 1; pass <= passes; pass += 1) {
+    const passSurfaceDepth = Math.min(
+      pass * Number(input.radiusDepthPerPass),
+      maxSurfaceDepth,
+    );
+    const passRatio = maxSurfaceDepth > 0 ? passSurfaceDepth / maxSurfaceDepth : 1;
+
+    lines.push(
+      "",
+      gCodeComment(`Radius pass ${pass} max edge depth ${formatNumber(passSurfaceDepth)} ${input.unit}`),
+    );
+
+    for (let row = 0; row <= rowCount; row += 1) {
+      const y = Math.min(outline.startY + row * yStep, outline.endY);
+      const width = fretboardOutlineWidthAtY(outline, y);
+      const centerHalfSpan = width / 2 - toolRadius;
+
+      if (centerHalfSpan <= 0) {
+        continue;
+      }
+
+      const leftX = layout.centerX - centerHalfSpan;
+      const rightX = layout.centerX + centerHalfSpan;
+      const startX = row % 2 === 0 ? leftX : rightX;
+      const endX = row % 2 === 0 ? rightX : leftX;
+      const sampleCount = Math.max(
+        8,
+        Math.min(180, Math.ceil(Math.abs(endX - startX) / pointSpacing)),
+      );
+
+      lines.push(`G0 Z${formatNumber(safeZ)}`);
+      lines.push(`G0 X${formatNumber(startX)} Y${formatNumber(y)}`);
+      lines.push(
+        `G1 Z${formatNumber(
+          -radiusSagitta(input, layout, startX) * passRatio,
+        )} F${formatNumber(input.radiusPlungeRate)}`,
+      );
+
+      for (let index = 1; index <= sampleCount; index += 1) {
+        const ratio = index / sampleCount;
+        const x = startX + (endX - startX) * ratio;
+        const z = -radiusSagitta(input, layout, x) * passRatio;
+        lines.push(
+          `G1 X${formatNumber(x)} Y${formatNumber(y)} Z${formatNumber(
+            z,
+          )} F${formatNumber(input.radiusFeedRate)}`,
+        );
+      }
+    }
+  }
+
+  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  return lines.join("\n");
 }
 
 function generateCutoutGCode(
@@ -1294,7 +1505,7 @@ async function saveGCode(
   URL.revokeObjectURL(url);
 }
 
-const fieldGroups: Array<{
+type FieldGroup = {
   title: string;
   stepLabel: string;
   summary: string;
@@ -1304,11 +1515,13 @@ const fieldGroups: Array<{
     step?: string;
     min?: string;
   }>;
-}> = [
+};
+
+const sharedFieldGroups: FieldGroup[] = [
   {
     title: "Scale And Frets",
-    stepLabel: "Setup",
-    summary: "Scale length and total fret count.",
+    stepLabel: "Shared",
+    summary: "Shared fret spacing data used by any operation that references fret positions.",
     fields: [
       { key: "scaleLength", label: "Scale length", step: "0.001", min: "0" },
       { key: "fretCount", label: "Number of frets", step: "1", min: "1" },
@@ -1316,8 +1529,8 @@ const fieldGroups: Array<{
   },
   {
     title: "Fretboard Layout",
-    stepLabel: "Shape",
-    summary: "String spread, board overhang, slot inset, and board-end margins.",
+    stepLabel: "Shared",
+    summary: "Shared board shape, top radius, and board-end margins.",
     fields: [
       {
         key: "nutStringSpread",
@@ -1338,8 +1551,8 @@ const fieldGroups: Array<{
         min: "0",
       },
       {
-        key: "fretInset",
-        label: "Fret inset (each side)",
+        key: "fretboardRadius",
+        label: "Fretboard top radius",
         step: "0.001",
         min: "0",
       },
@@ -1359,8 +1572,8 @@ const fieldGroups: Array<{
   },
   {
     title: "Material",
-    stepLabel: "Blank",
-    summary: "Physical stock dimensions used for validation and preview.",
+    stepLabel: "Shared",
+    summary: "Physical stock dimensions used for each operation's validation and preview.",
     fields: [
       { key: "materialWidth", label: "Material width", step: "0.001", min: "0" },
       {
@@ -1377,24 +1590,15 @@ const fieldGroups: Array<{
       },
     ],
   },
-  {
-    title: "Toolpath",
-    stepLabel: "Slots",
-    summary: "Fret-slot cutter, radius, depth, feed, and spindle settings.",
-    fields: [
-      { key: "bitDiameter", label: "Cutting bit diameter", step: "0.001", min: "0" },
-      {
-        key: "fretboardRadius",
-        label: "Fretboard top radius",
-        step: "0.001",
-        min: "0",
-      },
-      { key: "slotDepth", label: "Fret slot depth", step: "0.001", min: "0" },
-      { key: "feedRate", label: "Feed rate", step: "0.1", min: "0" },
-      { key: "depthPerPass", label: "Depth per pass", step: "0.001", min: "0" },
-      { key: "spindleRpm", label: "Spindle RPM", step: "1", min: "0" },
-    ],
-  },
+];
+
+const slotFields: FieldGroup["fields"] = [
+  { key: "fretInset", label: "Fret inset (each side)", step: "0.001", min: "0" },
+  { key: "bitDiameter", label: "Slot cutter diameter", step: "0.001", min: "0" },
+  { key: "slotDepth", label: "Fret slot depth", step: "0.001", min: "0" },
+  { key: "feedRate", label: "Slot feed rate", step: "0.1", min: "0" },
+  { key: "depthPerPass", label: "Slot depth per pass", step: "0.001", min: "0" },
+  { key: "spindleRpm", label: "Slot spindle RPM", step: "1", min: "0" },
 ];
 
 function CollapsiblePanel({
@@ -1496,22 +1700,40 @@ export default function Home() {
     [markerAssignments],
   );
   const markers = useMemo(() => calculateMarkers(form, layout), [form, layout]);
-  const validation = useMemo(
-    () => getValidationMessages(form, layout),
-    [form, layout],
-  );
   const fretValidation = useMemo(
-    () => getValidationMessages(form, layout, true, false),
+    () => getValidationMessages(form, layout, true, false, false),
     [form, layout],
   );
   const cutoutValidation = useMemo(
-    () => getValidationMessages(form, layout, false, true),
+    () => getValidationMessages(form, layout, false, true, false, false),
+    [form, layout],
+  );
+  const radiusValidation = useMemo(
+    () => getValidationMessages(form, layout, false, false, true, false),
+    [form, layout],
+  );
+  const markerValidation = useMemo(
+    () => getValidationMessages(form, layout, true, false, false, false),
     [form, layout],
   );
   const canGenerate = fretValidation.errors.length === 0;
   const canGenerateCutout = cutoutValidation.errors.length === 0;
+  const canGenerateRadius = radiusValidation.errors.length === 0;
   const canGenerateMarkers =
-    canGenerate && form.markersEnabled && markers.length > 0;
+    markerValidation.errors.length === 0 && form.markersEnabled && markers.length > 0;
+  const markerExportValidation =
+    form.markersEnabled && markers.length > 0
+      ? markerValidation
+      : {
+          errors: ["Enable at least one marker pocket to export markers."],
+          warnings: markerValidation.warnings,
+        };
+  const validationGroups = [
+    { label: "Radius Top", validation: radiusValidation },
+    { label: "Cutout Only", validation: cutoutValidation },
+    { label: form.markersEnabled ? "Frets + Markers" : "Fret Slots", validation: fretValidation },
+    { label: "Markers Only", validation: markerExportValidation },
+  ];
 
   const preview = useMemo(() => {
     const width = 720;
@@ -1537,6 +1759,52 @@ export default function Home() {
     };
   }, [form.materialLength, form.materialWidth]);
 
+  const radiusPreview = useMemo(() => {
+    const width = 720;
+    const height = 220;
+    const padX = 44;
+    const topY = 48;
+    const bottomY = 166;
+    const boardWidth = Math.max(fretboardOutline.nutWidth, fretboardOutline.endWidth);
+    const halfBoardWidth = boardWidth / 2;
+    const usableWidth = width - padX * 2;
+    const xScale = usableWidth / Math.max(boardWidth, 0.000001);
+    const edgeDrop =
+      halfBoardWidth < Number(form.fretboardRadius)
+        ? radiusSagitta(form, layout, layout.centerX + halfBoardWidth)
+        : 0;
+    const zScale = edgeDrop > 0 ? (bottomY - topY) / edgeDrop : 1;
+    const centerX = width / 2;
+    const points = Array.from({ length: 65 }, (_, index) => {
+      const ratio = index / 64;
+      const xFromCenter = -halfBoardWidth + boardWidth * ratio;
+      const sagitta =
+        halfBoardWidth < Number(form.fretboardRadius)
+          ? radiusSagitta(form, layout, layout.centerX + xFromCenter)
+          : 0;
+
+      return {
+        x: centerX + xFromCenter * xScale,
+        y: topY + sagitta * zScale,
+      };
+    });
+    const verticalExaggeration = zScale / xScale;
+
+    return {
+      width,
+      height,
+      topY,
+      bottomY,
+      centerX,
+      leftX: centerX - halfBoardWidth * xScale,
+      rightX: centerX + halfBoardWidth * xScale,
+      boardWidth,
+      edgeDrop,
+      verticalExaggeration,
+      points,
+    };
+  }, [form, fretboardOutline.endWidth, fretboardOutline.nutWidth, layout]);
+
   function updateField(key: keyof FormState, value: string) {
     setForm((current) => {
       if (key === "unit") {
@@ -1560,6 +1828,7 @@ export default function Home() {
       const numericValue =
         key === "fretCount" ||
         key === "spindleRpm" ||
+        key === "radiusSpindleRpm" ||
         key === "cutoutSpindleRpm" ||
         key === "tabCount"
           ? Math.round(Number(value))
@@ -1619,6 +1888,18 @@ export default function Home() {
     );
   }
 
+  async function handleGenerateRadius() {
+    if (!canGenerateRadius) {
+      return;
+    }
+
+    await saveGCode(
+      generateRadiusGCode(form, layout, fileExtension),
+      fileExtension,
+      "fretboard-radius",
+    );
+  }
+
   async function handleGenerateMarkers() {
     if (!canGenerateMarkers) {
       return;
@@ -1639,10 +1920,10 @@ export default function Home() {
             <section className="rounded-lg border border-[#c7d1d8] bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-2">
                 <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[#8a4f1f]">
-                  CNC fret slot generator
+                  CNC fretboard generator
                 </p>
                 <h1 className="text-3xl font-semibold leading-tight text-[#1f2523]">
-                  Radiused fret slot G-code
+                  Fretboard radius and slot G-code
                 </h1>
               </div>
 
@@ -1666,13 +1947,13 @@ export default function Home() {
 
             <div className="grid gap-4">
               <CollapsiblePanel
-                title="Fret Slot Setup"
-                stepLabel="Slots"
-                summary="Required inputs for fret positions, slot lengths, stock fit, and slot cutting."
+                title="Shared Board Setup"
+                stepLabel="Shared"
+                summary="Geometry, fret spacing, top radius, and material data used across operations."
                 accent="teal"
               >
                 <div className="grid gap-3">
-                  {fieldGroups.map((group) => (
+                  {sharedFieldGroups.map((group) => (
                     <section
                       key={group.title}
                       className="overflow-hidden rounded-md border border-[#d6dde2] bg-[#f7fafb]"
@@ -1716,11 +1997,46 @@ export default function Home() {
               </CollapsiblePanel>
 
               <CollapsiblePanel
+                title="Fret Slots"
+                stepLabel="Slots"
+                summary="Standalone fret-slot settings for Fret Slots or Frets + Markers exports."
+                accent="teal"
+              >
+                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
+                  Uses the shared fret positions, board width, and fretboard top radius. These
+                  slot inset, cutter, depth, and feed settings are only required for slot exports.
+                  Slot bottoms follow the selected top radius.
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {slotFields.map((field) => (
+                    <label
+                      key={field.key}
+                      className="grid gap-1 text-sm font-medium text-[#26302f]"
+                    >
+                      <span>{field.label}</span>
+                      <input
+                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+                        type="number"
+                        min={field.min}
+                        step={field.step}
+                        value={form[field.key] as string | number}
+                        onChange={(event) => updateField(field.key, event.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel
                 title="Fretboard Cutout"
-                stepLabel="Cut First"
-                summary="Profile the blank outline before fret slots or marker pockets."
+                stepLabel="Cutout"
+                summary="Standalone outline profiling settings; does not use radius or slot cutter settings."
                 accent="blue"
               >
+                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
+                  Uses the shared board shape above. These cutter, depth, tab, and feed settings
+                  are only required for the cutout export.
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   {[
                     ["cutoutBitDiameter", "Cutout bit diameter"],
@@ -1791,12 +2107,56 @@ export default function Home() {
               </CollapsiblePanel>
 
               <CollapsiblePanel
+                title="Fretboard Radius"
+                stepLabel="Surface"
+                summary="Standalone top-radius surfacing settings; does not use cutout or slot cutter settings."
+                accent="teal"
+                defaultOpen={false}
+              >
+                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
+                  Uses the shared board width, end margins, material, and fretboard top radius.
+                  These radiusing cutter and feed settings are only required for the Radius Top export.
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {[
+                    ["radiusBitDiameter", "Radiusing bit diameter"],
+                    ["radiusStepOver", "Y step-over"],
+                    ["radiusDepthPerPass", "Max depth per pass"],
+                    ["radiusFeedRate", "Feed rate"],
+                    ["radiusPlungeRate", "Plunge rate"],
+                    ["radiusSpindleRpm", "Spindle RPM"],
+                  ].map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="grid gap-1 text-sm font-medium text-[#26302f]"
+                    >
+                      <span>{label}</span>
+                      <input
+                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+                        type="number"
+                        min="0.001"
+                        step={key === "radiusSpindleRpm" ? "1" : "0.001"}
+                        value={form[key as keyof FormState] as string | number}
+                        onChange={(event) =>
+                          updateField(key as keyof FormState, event.target.value)
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel
                 title="Fretboard Markers"
-                stepLabel="Details"
-                summary="Configure marker pockets and choose single or double markers by fret space."
+                stepLabel="Markers"
+                summary="Standalone marker-pocket settings; can be exported without slot or cutout settings."
                 accent="brown"
                 defaultOpen={false}
               >
+                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
+                  Uses the shared fret positions and fretboard radius. These marker settings are
+                  only required for marker exports or when including markers with fret slots.
+                </div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-[#26302f]">
                   <input
                     className="h-4 w-4 accent-[#19695f]"
@@ -2081,6 +2441,115 @@ export default function Home() {
             </CollapsiblePanel>
 
             <CollapsiblePanel
+              title="Radius Preview"
+              stepLabel="Surface"
+              summary="Cross-section of the generated fretboard top radius at the widest board width."
+              accent="teal"
+            >
+              <svg
+                className="h-auto w-full rounded-md border border-[#d6dde2] bg-[#f7fafb]"
+                viewBox={`0 0 ${radiusPreview.width} ${radiusPreview.height}`}
+                role="img"
+                aria-label="Cross-section preview of the fretboard radius"
+              >
+                <rect
+                  x={svgNumber(radiusPreview.leftX)}
+                  y={svgNumber(radiusPreview.topY)}
+                  width={svgNumber(radiusPreview.rightX - radiusPreview.leftX)}
+                  height={svgNumber(radiusPreview.bottomY - radiusPreview.topY)}
+                  fill="#e9eef2"
+                  stroke="#60717b"
+                  strokeWidth="1.5"
+                />
+                <polygon
+                  points={[
+                    ...radiusPreview.points.map(
+                      (point) => `${svgNumber(point.x)},${svgNumber(point.y)}`,
+                    ),
+                    `${svgNumber(radiusPreview.rightX)},${svgNumber(radiusPreview.bottomY)}`,
+                    `${svgNumber(radiusPreview.leftX)},${svgNumber(radiusPreview.bottomY)}`,
+                  ].join(" ")}
+                  fill="#dcebe2"
+                  stroke="none"
+                />
+                <line
+                  x1={svgNumber(radiusPreview.leftX)}
+                  y1={svgNumber(radiusPreview.topY)}
+                  x2={svgNumber(radiusPreview.rightX)}
+                  y2={svgNumber(radiusPreview.topY)}
+                  stroke="#60717b"
+                  strokeDasharray="6 6"
+                  strokeWidth="1.5"
+                />
+                <polyline
+                  points={radiusPreview.points
+                    .map((point) => `${svgNumber(point.x)},${svgNumber(point.y)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke="#19695f"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="4"
+                />
+                <line
+                  x1={svgNumber(radiusPreview.centerX)}
+                  y1={svgNumber(radiusPreview.topY - 16)}
+                  x2={svgNumber(radiusPreview.centerX)}
+                  y2={svgNumber(radiusPreview.bottomY + 10)}
+                  stroke="#8a4f1f"
+                  strokeDasharray="5 5"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1={svgNumber(radiusPreview.rightX - 18)}
+                  y1={svgNumber(radiusPreview.topY)}
+                  x2={svgNumber(radiusPreview.rightX - 18)}
+                  y2={svgNumber(radiusPreview.bottomY)}
+                  stroke="#c2412e"
+                  strokeWidth="2"
+                />
+                <text
+                  x={svgNumber(radiusPreview.centerX + 10)}
+                  y={svgNumber(radiusPreview.topY - 8)}
+                  fill="#8a4f1f"
+                  fontSize="13"
+                  fontWeight="700"
+                >
+                  Z0 centerline
+                </text>
+                <text
+                  x={svgNumber(radiusPreview.rightX - 26)}
+                  y={svgNumber((radiusPreview.topY + radiusPreview.bottomY) / 2)}
+                  fill="#c2412e"
+                  fontSize="13"
+                  fontWeight="700"
+                  textAnchor="end"
+                >
+                  edge drop {numberFormatter.format(radiusPreview.edgeDrop)} {form.unit}
+                </text>
+                <text
+                  x={svgNumber(radiusPreview.leftX)}
+                  y={svgNumber(radiusPreview.height - 18)}
+                  fill="#26302f"
+                  fontSize="13"
+                  fontWeight="700"
+                >
+                  widest width {numberFormatter.format(radiusPreview.boardWidth)} {form.unit}
+                </text>
+                <text
+                  x={svgNumber(radiusPreview.rightX)}
+                  y={svgNumber(radiusPreview.height - 18)}
+                  fill="#53616a"
+                  fontSize="13"
+                  fontWeight="700"
+                  textAnchor="end"
+                >
+                  vertical scale {numberFormatter.format(radiusPreview.verticalExaggeration)}x
+                </text>
+              </svg>
+            </CollapsiblePanel>
+
+            <CollapsiblePanel
               title="Layout Summary"
               stepLabel="Check"
               summary="Key calculated values before exporting any machine files."
@@ -2138,7 +2607,15 @@ export default function Home() {
                     </option>
                   ))}
                 </select>
-                <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-0">
+                <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-4 sm:gap-0">
+                  <button
+                    type="button"
+                    className="h-11 rounded-md bg-[#60717b] px-4 text-sm font-semibold text-white transition hover:bg-[#39474e] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
+                    disabled={!canGenerateRadius}
+                    onClick={handleGenerateRadius}
+                  >
+                    Radius Top
+                  </button>
                   <button
                     type="button"
                     className="h-11 rounded-md bg-[#2f5d7c] px-4 text-sm font-semibold text-white transition hover:bg-[#264c66] disabled:cursor-not-allowed disabled:bg-[#9ca49b] sm:rounded-none"
@@ -2166,26 +2643,40 @@ export default function Home() {
                 </div>
               </div>
 
-              {(validation.errors.length > 0 || validation.warnings.length > 0) && (
-                <div className="mb-4 grid gap-2">
-                  {validation.errors.map((error) => (
+              <div className="mb-4 grid gap-2 md:grid-cols-2">
+                {validationGroups.map(({ label, validation }) => {
+                  const isReady = validation.errors.length === 0;
+
+                  return (
                     <div
-                      key={error}
-                      className="rounded-md border border-[#d29b91] bg-[#fff1ef] px-3 py-2 text-sm font-medium text-[#7d2d20]"
+                      key={label}
+                      className={`rounded-md border px-3 py-2 text-sm ${
+                        isReady
+                          ? "border-[#b8d0c1] bg-[#f1f8f3] text-[#14544c]"
+                          : "border-[#d29b91] bg-[#fff1ef] text-[#7d2d20]"
+                      }`}
                     >
-                      {error}
+                      <div className="font-semibold">
+                        {label}: {isReady ? "ready" : "needs input"}
+                      </div>
+                      {validation.errors.length > 0 ? (
+                        <ul className="mt-1 list-disc pl-5">
+                          {validation.errors.map((error) => (
+                            <li key={error}>{error}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {validation.warnings.length > 0 ? (
+                        <ul className="mt-1 list-disc pl-5 text-[#72560e]">
+                          {validation.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
-                  ))}
-                  {validation.warnings.map((warning) => (
-                    <div
-                      key={warning}
-                      className="rounded-md border border-[#d7bc73] bg-[#fff8df] px-3 py-2 text-sm font-medium text-[#72560e]"
-                    >
-                      {warning}
-                    </div>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
 
               <div className="max-h-[420px] overflow-auto rounded-md border border-[#d6dde2]">
                 <table className="w-full min-w-[720px] border-collapse text-left text-sm">

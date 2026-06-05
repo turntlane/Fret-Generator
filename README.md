@@ -1,6 +1,6 @@
-# Fret Slot CNC G-Code Builder
+# Fretboard CNC G-Code Builder
 
-A Next.js app for generating CNC G-code to cut radiused fret slots and optional fretboard marker pockets.
+A Next.js app for generating CNC G-code to radius a fretboard top, cut radiused fret slots, profile the fretboard outline, and cut optional fretboard marker pockets.
 
 ## Local Development
 
