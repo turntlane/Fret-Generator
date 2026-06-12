@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Unit = "mm" | "in";
 type MarkerShape = "dot" | "rectangle" | "diamond" | "trapezoid";
@@ -179,6 +179,77 @@ const gCodeFileExtensions: GCodeFileExtension[] = [
   ".ngc",
 ];
 
+const markerShapes: MarkerShape[] = ["dot", "rectangle", "diamond", "trapezoid"];
+
+type SavedProfile = {
+  name: string;
+  form: FormState;
+  fileExtension: GCodeFileExtension;
+};
+
+const lastSessionStorageKey = "fretboard-gcode:last-session";
+const profilesStorageKey = "fretboard-gcode:profiles";
+
+function sanitizeFormState(value: unknown): FormState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const next = { ...defaultMetricState };
+
+  for (const key of Object.keys(defaultMetricState) as Array<keyof FormState>) {
+    const stored = record[key];
+    if (typeof stored === typeof defaultMetricState[key]) {
+      next[key] = stored as never;
+    }
+  }
+
+  if (next.unit !== "mm" && next.unit !== "in") {
+    next.unit = defaultMetricState.unit;
+  }
+
+  if (!markerShapes.includes(next.markerShape)) {
+    next.markerShape = defaultMetricState.markerShape;
+  }
+
+  return next;
+}
+
+function sanitizeFileExtension(value: unknown): GCodeFileExtension | null {
+  return gCodeFileExtensions.includes(value as GCodeFileExtension)
+    ? (value as GCodeFileExtension)
+    : null;
+}
+
+function sanitizeProfiles(value: unknown): SavedProfile[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry): SavedProfile[] => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+
+    const record = entry as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const form = sanitizeFormState(record.form);
+
+    if (!name || !form) {
+      return [];
+    }
+
+    return [
+      {
+        name,
+        form,
+        fileExtension: sanitizeFileExtension(record.fileExtension) ?? ".nc",
+      },
+    ];
+  });
+}
+
 const linearInputKeys: Array<keyof FormState> = [
   "scaleLength",
   "nutStringSpread",
@@ -219,12 +290,169 @@ const linearInputKeys: Array<keyof FormState> = [
   "doubleMarkerSpacing",
 ];
 
+const fieldDescriptions: Record<string, string> = {
+  scaleLength:
+    "The vibrating string length from the nut to the bridge saddles. Every fret position is derived from this length using the equal-temperament formula.",
+  fretCount: "Total number of fret slots to calculate and cut.",
+  nutStringSpread:
+    "Center-to-center distance between the two outer strings at the nut. Together with the overhang, this sets the board width at the nut.",
+  bridgeStringSpread:
+    "Center-to-center distance between the two outer strings at the bridge. Controls how much the board tapers wider toward the body.",
+  fretboardOverhang:
+    "Extra board width outside each outer string so the strings do not sit right on the board edge.",
+  fretboardRadius:
+    "Radius of the curved top surface across the board, e.g. 305 mm (12 in). Larger values give a flatter board.",
+  nutEndMargin:
+    "Extra board length added beyond the nut line at the headstock end of the board outline.",
+  lastFretEndMargin:
+    "Extra board length added past the last fret at the body end of the board outline.",
+  materialWidth:
+    "Width of the stock blank (X axis). The board is centered across this width.",
+  materialLength:
+    "Length of the stock blank (Y axis). The fret layout is centered along this length.",
+  materialThickness:
+    "Thickness of the stock blank (Z axis). Used to validate cut depths.",
+  fretInset:
+    "How far each slot end stops short of the board edge on each side, so the slots stay hidden at the edges.",
+  bitDiameter:
+    "Diameter of the slotting cutter. This equals the finished slot width, so match it to your fret tang.",
+  slotDepth:
+    "Final slot depth measured from the radiused top surface at every point along the slot.",
+  feedRate:
+    "Cutting speed while milling along each slot, in the selected unit per minute.",
+  depthPerPass:
+    "Maximum depth removed per pass. Each slot is recut in steps until it reaches the full slot depth.",
+  spindleRpm: "Spindle speed while cutting fret slots.",
+  cutoutBitDiameter:
+    "Diameter of the end mill used to profile the board outline. The toolpath is offset outward by half this diameter.",
+  cutoutDepth:
+    "Total depth of the outline cut. Set it to the material thickness to cut all the way through.",
+  cutoutDepthPerPass: "Depth removed on each loop around the outline.",
+  cutoutFeedRate: "Cutting speed while profiling the outline.",
+  cutoutPlungeRate:
+    "Feed used for downward Z moves at the start of each outline pass.",
+  cutoutSpindleRpm: "Spindle speed for the outline cut.",
+  cutoutAllowance:
+    "Extra material left outside the final outline for cleanup or sanding. Zero cuts exactly to final size.",
+  cutoutTabsEnabled:
+    "Leaves small uncut bridges along the outline so the board stays attached to the blank until you free it by hand.",
+  tabCount: "Number of holding tabs spaced evenly around the outline.",
+  tabWidth: "Length of each holding tab along the cut path.",
+  tabHeight:
+    "Thickness of material left uncut under the cutter at each tab. Must be smaller than the cutout depth.",
+  radiusBitDiameter:
+    "Diameter of the surfacing cutter used to mill the curved top.",
+  radiusStepOver:
+    "Distance between surfacing rows along the board length. Smaller values give a smoother top but a longer program.",
+  radiusDepthPerPass:
+    "Maximum material removed at the board edges in one surfacing pass. The curve is recut deeper until it reaches the full radius.",
+  radiusFeedRate: "Cutting speed while surfacing the radius.",
+  radiusPlungeRate:
+    "Feed used for downward Z moves at the start of each surfacing row.",
+  radiusSpindleRpm: "Spindle speed for the radius surfacing.",
+  markersEnabled:
+    "Adds inlay marker pockets to the markers-only export and to the combined fret slots program.",
+  markerShape:
+    "Pocket shape cut for each marker: round dot, rectangle, diamond, or trapezoid inlay.",
+  markerFrets:
+    "Comma-separated fret spaces that get markers. Add :2 for a double marker, e.g. 3,5,7,9,12:2.",
+  fretSpaceMarkers:
+    "Quick toggles for the marker map above: choose no marker, a single centered marker, or a double marker for each fret space.",
+  markerWidth:
+    "Dot diameter, or the overall side-to-side width of rectangle, diamond, and trapezoid pockets.",
+  markerLength:
+    "Pocket size along the board length for rectangle, diamond, and trapezoid shapes.",
+  markerTopWidth:
+    "Width of the trapezoid's nut-side edge. Cannot be wider than the marker width.",
+  markerDepth:
+    "Final pocket depth below the radiused top surface. Match your inlay thickness.",
+  markerDepthPerPass: "Depth removed per pocket clearing pass.",
+  markerBitDiameter:
+    "Diameter of the cutter used to clear the marker pockets. Must be smaller than the marker width.",
+  markerFeedRate: "Cutting speed while clearing marker pockets.",
+  markerPlungeRate: "Feed used for downward Z moves into each pocket.",
+  markerSpindleRpm: "Spindle speed for marker pockets.",
+  markerXOffset:
+    "Shifts all markers sideways from the board centerline. Zero keeps them centered.",
+  doubleMarkerSpacing:
+    "Center-to-center distance between the two pockets of a double marker.",
+  fileExtension:
+    "File extension used for the downloaded program. The G-code content is the same; pick the extension your machine controller expects.",
+};
+
+type HighlightTarget =
+  | "material"
+  | "outline"
+  | "cutterPath"
+  | "slots"
+  | "markers"
+  | "radius";
+
+const highlightColor = "#e07b00";
+
+const fieldHighlightTargets: Record<string, HighlightTarget> = {
+  scaleLength: "slots",
+  fretCount: "slots",
+  nutStringSpread: "outline",
+  bridgeStringSpread: "outline",
+  fretboardOverhang: "outline",
+  fretboardRadius: "radius",
+  nutEndMargin: "outline",
+  lastFretEndMargin: "outline",
+  materialWidth: "material",
+  materialLength: "material",
+  materialThickness: "material",
+  fretInset: "slots",
+  bitDiameter: "slots",
+  slotDepth: "slots",
+  feedRate: "slots",
+  depthPerPass: "slots",
+  spindleRpm: "slots",
+  cutoutBitDiameter: "cutterPath",
+  cutoutDepth: "cutterPath",
+  cutoutDepthPerPass: "cutterPath",
+  cutoutFeedRate: "cutterPath",
+  cutoutPlungeRate: "cutterPath",
+  cutoutSpindleRpm: "cutterPath",
+  cutoutAllowance: "cutterPath",
+  cutoutTabsEnabled: "cutterPath",
+  tabCount: "cutterPath",
+  tabWidth: "cutterPath",
+  tabHeight: "cutterPath",
+  radiusBitDiameter: "radius",
+  radiusStepOver: "radius",
+  radiusDepthPerPass: "radius",
+  radiusFeedRate: "radius",
+  radiusPlungeRate: "radius",
+  radiusSpindleRpm: "radius",
+  markersEnabled: "markers",
+  markerShape: "markers",
+  markerFrets: "markers",
+  fretSpaceMarkers: "markers",
+  markerWidth: "markers",
+  markerLength: "markers",
+  markerTopWidth: "markers",
+  markerDepth: "markers",
+  markerDepthPerPass: "markers",
+  markerBitDiameter: "markers",
+  markerFeedRate: "markers",
+  markerPlungeRate: "markers",
+  markerSpindleRpm: "markers",
+  markerXOffset: "markers",
+  doubleMarkerSpacing: "markers",
+};
+
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
 
 function formatNumber(value: number, digits = 4) {
-  return Number.isFinite(value) ? value.toFixed(digits) : "0";
+  if (!Number.isFinite(value)) {
+    throw new Error(
+      "G-code generation produced a coordinate that is not a finite number. Check the fretboard radius, marker layout, and board dimensions.",
+    );
+  }
+  return value.toFixed(digits);
 }
 
 function gCodeComment(text: string) {
@@ -252,7 +480,7 @@ function gCodeFileTypeLabel(extension: GCodeFileExtension) {
 }
 
 function svgNumber(value: number) {
-  return formatNumber(value, 6);
+  return Number.isFinite(value) ? value.toFixed(6) : "0";
 }
 
 function rounded(value: number, digits = 4) {
@@ -505,36 +733,82 @@ function calculateMarkers(input: FormState, layout: Layout): MarkerPocket[] {
   });
 }
 
+function polygonCentroid(points: Point[]) {
+  return points.reduce(
+    (acc, point) => ({
+      x: acc.x + point.x / points.length,
+      y: acc.y + point.y / points.length,
+    }),
+    { x: 0, y: 0 },
+  );
+}
+
+function polygonArea(points: Point[]) {
+  return (
+    points.reduce((total, point, index) => {
+      const next = points[(index + 1) % points.length];
+      return total + point.x * next.y - next.x * point.y;
+    }, 0) / 2
+  );
+}
+
+function insetConvexPolygon(points: Point[], inset: number): Point[] {
+  const centroid = polygonCentroid(points);
+  const edges = points.map((start, index) => {
+    const end = points[(index + 1) % points.length];
+    const length = Math.max(pointDistance(start, end), 0.000001);
+    let normalX = -(end.y - start.y) / length;
+    let normalY = (end.x - start.x) / length;
+
+    if ((centroid.x - start.x) * normalX + (centroid.y - start.y) * normalY < 0) {
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+
+    return {
+      x: start.x + normalX * inset,
+      y: start.y + normalY * inset,
+      directionX: end.x - start.x,
+      directionY: end.y - start.y,
+    };
+  });
+
+  const insetPoints = points.map((_, index) => {
+    const previous = edges[(index + edges.length - 1) % edges.length];
+    const current = edges[index];
+    const determinant =
+      previous.directionX * current.directionY -
+      previous.directionY * current.directionX;
+
+    if (Math.abs(determinant) < 0.000001) {
+      return { x: current.x, y: current.y };
+    }
+
+    const t =
+      ((current.x - previous.x) * current.directionY -
+        (current.y - previous.y) * current.directionX) /
+      determinant;
+    return {
+      x: previous.x + previous.directionX * t,
+      y: previous.y + previous.directionY * t,
+    };
+  });
+
+  // An inset larger than the shape flips the polygon inside out; collapse to a
+  // single plunge point at the centroid instead of emitting crossed toolpaths.
+  const flipped =
+    insetPoints.some(
+      (point) => !Number.isFinite(point.x) || !Number.isFinite(point.y),
+    ) || Math.sign(polygonArea(insetPoints)) !== Math.sign(polygonArea(points));
+
+  return flipped ? points.map(() => ({ ...centroid })) : insetPoints;
+}
+
 function markerPolygon(input: FormState, marker: MarkerPocket) {
-  const toolRadius = Number(input.markerBitDiameter) / 2;
-  const halfWidth = Math.max(Number(input.markerWidth) / 2 - toolRadius, 0);
-  const halfLength = Math.max(Number(input.markerLength) / 2 - toolRadius, 0);
-  const halfTopWidth = Math.max(Number(input.markerTopWidth) / 2 - toolRadius, 0);
-
-  if (input.markerShape === "diamond") {
-    return [
-      { x: marker.centerX, y: marker.y - halfLength },
-      { x: marker.centerX + halfWidth, y: marker.y },
-      { x: marker.centerX, y: marker.y + halfLength },
-      { x: marker.centerX - halfWidth, y: marker.y },
-    ];
-  }
-
-  if (input.markerShape === "trapezoid") {
-    return [
-      { x: marker.centerX - halfTopWidth, y: marker.y - halfLength },
-      { x: marker.centerX + halfTopWidth, y: marker.y - halfLength },
-      { x: marker.centerX + halfWidth, y: marker.y + halfLength },
-      { x: marker.centerX - halfWidth, y: marker.y + halfLength },
-    ];
-  }
-
-  return [
-    { x: marker.centerX - halfWidth, y: marker.y - halfLength },
-    { x: marker.centerX + halfWidth, y: marker.y - halfLength },
-    { x: marker.centerX + halfWidth, y: marker.y + halfLength },
-    { x: marker.centerX - halfWidth, y: marker.y + halfLength },
-  ];
+  return insetConvexPolygon(
+    markerPreviewPolygon(input, marker),
+    Number(input.markerBitDiameter) / 2,
+  );
 }
 
 function markerPreviewPolygon(input: FormState, marker: MarkerPocket) {
@@ -569,10 +843,7 @@ function markerPreviewPolygon(input: FormState, marker: MarkerPocket) {
 }
 
 function scaledPolygon(points: Array<{ x: number; y: number }>, scale: number) {
-  const center = points.reduce(
-    (acc, point) => ({ x: acc.x + point.x / points.length, y: acc.y + point.y / points.length }),
-    { x: 0, y: 0 },
-  );
+  const center = polygonCentroid(points);
 
   return points.map((point) => ({
     x: center.x + (point.x - center.x) * scale,
@@ -761,6 +1032,18 @@ function getValidationMessages(
       if (Number(input.tabHeight) >= Number(input.cutoutDepth)) {
         errors.push("Tab height must be smaller than cutout depth.");
       }
+
+      const widestHalfWidth = Math.max(outline.nutWidth, outline.endWidth) / 2;
+      const edgeDrop =
+        widestHalfWidth < Number(input.fretboardRadius)
+          ? radiusSagitta(input, layout, layout.centerX + widestHalfWidth)
+          : 0;
+
+      if (Number(input.tabHeight) <= edgeDrop) {
+        warnings.push(
+          "Radiusing the top before the cutout lowers the waste beside the board edge by the edge drop, which can remove the holding tabs; use a taller tab height.",
+        );
+      }
     }
   }
 
@@ -768,11 +1051,12 @@ function getValidationMessages(
     const outline = calculateFretboardOutline(input, layout);
     const toolRadius = Number(input.radiusBitDiameter) / 2;
     const narrowestWidth = Math.min(outline.nutWidth, outline.endWidth);
-    const widestCenterSpan = Math.max(outline.nutWidth, outline.endWidth) / 2 - toolRadius;
+    const widestHalfWidth = Math.max(outline.nutWidth, outline.endWidth) / 2;
+    const widestTravelSpan = widestHalfWidth + toolRadius;
     const maxSurfaceDepth =
-      widestCenterSpan > 0
-        ? radiusSagitta(input, layout, layout.centerX + widestCenterSpan)
-        : 0;
+      widestHalfWidth < Number(input.fretboardRadius)
+        ? radiusSagitta(input, layout, layout.centerX + widestHalfWidth)
+        : Number.POSITIVE_INFINITY;
 
     if (!includeCutout) {
       if (outline.startY < 0) {
@@ -800,12 +1084,17 @@ function getValidationMessages(
       errors.push("Radiusing bit diameter must be smaller than the narrowest fretboard width.");
     }
 
-    if (widestCenterSpan <= 0) {
-      errors.push("Radiusing bit leaves no cutter-center travel inside the fretboard outline.");
+    if (
+      layout.centerX - widestTravelSpan < 0 ||
+      layout.centerX + widestTravelSpan > Number(input.materialWidth)
+    ) {
+      errors.push(
+        "Radiusing toolpath overhangs the board outline by the bit radius and extends beyond the material width.",
+      );
     }
 
-    if (widestCenterSpan >= Number(input.fretboardRadius)) {
-      errors.push("Fretboard radius must be larger than the widest radiusing cutter-center half-span.");
+    if (widestHalfWidth >= Number(input.fretboardRadius)) {
+      errors.push("Fretboard radius must be larger than half the widest fretboard width.");
     }
 
     if (Number(input.radiusStepOver) > Number(input.radiusBitDiameter)) {
@@ -904,6 +1193,15 @@ function getValidationMessages(
     }
 
     if (
+      markerMaxOffset - Number(input.markerBitDiameter) / 2 >=
+      Number(input.fretboardRadius)
+    ) {
+      errors.push(
+        "Fretboard radius must be larger than the widest marker cutter offset from the centerline.",
+      );
+    }
+
+    if (
       markers.some(
         (marker) =>
           marker.centerX - Number(input.markerWidth) / 2 < 0 ||
@@ -936,19 +1234,29 @@ function addMarkerPocketGCode(
   passDepth: number,
 ) {
   const stepOver = Math.max(Number(input.markerBitDiameter) * 0.65, 0.001);
+  const toolRadius = Math.max(Number(input.markerBitDiameter) / 2, 0.001);
+  // Keep the innermost contour within one tool radius of the pocket center so
+  // no uncut post is left standing there.
+  const contourStep = Math.min(stepOver, toolRadius);
 
   if (input.markerShape === "dot") {
     const maxRadius = Math.max(
       Number(input.markerWidth) / 2 - Number(input.markerBitDiameter) / 2,
       0,
     );
-    const contourCount = Math.max(1, Math.ceil(maxRadius / stepOver));
+    const contourCount = Math.max(1, Math.ceil(maxRadius / contourStep));
     const pointCount = 40;
 
     for (let contour = 1; contour <= contourCount; contour += 1) {
       const radius = maxRadius * (contour / contourCount);
       const startX = marker.centerX + radius;
-      lines.push(`G0 X${formatNumber(startX)} Y${formatNumber(marker.y)}`);
+      lines.push(
+        contour === 1
+          ? `G0 X${formatNumber(startX)} Y${formatNumber(marker.y)}`
+          : `G1 X${formatNumber(startX)} Y${formatNumber(
+              marker.y,
+            )} F${formatNumber(input.markerFeedRate)}`,
+      );
       lines.push(
         `G1 Z${formatNumber(
           zForRadius(input, layout, startX, passDepth),
@@ -970,13 +1278,23 @@ function addMarkerPocketGCode(
   }
 
   const polygon = markerPolygon(input, marker);
-  const maxPocketSpan = Math.max(Number(input.markerWidth), Number(input.markerLength));
-  const contourCount = Math.max(1, Math.ceil(maxPocketSpan / 2 / stepOver));
+  const polygonCenter = polygonCentroid(polygon);
+  const maxVertexDistance = polygon.reduce(
+    (largest, point) => Math.max(largest, pointDistance(polygonCenter, point)),
+    0,
+  );
+  const contourCount = Math.max(1, Math.ceil(maxVertexDistance / contourStep));
 
   for (let contour = 1; contour <= contourCount; contour += 1) {
     const points = scaledPolygon(polygon, contour / contourCount);
     const firstPoint = points[0];
-    lines.push(`G0 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`);
+    lines.push(
+      contour === 1
+        ? `G0 X${formatNumber(firstPoint.x)} Y${formatNumber(firstPoint.y)}`
+        : `G1 X${formatNumber(firstPoint.x)} Y${formatNumber(
+            firstPoint.y,
+          )} F${formatNumber(input.markerFeedRate)}`,
+    );
     lines.push(
       `G1 Z${formatNumber(
         zForRadius(input, layout, firstPoint.x, passDepth),
@@ -1022,10 +1340,16 @@ function addMarkerOperationGCode(
   );
 
   if (stopCurrentSpindle) {
-    lines.push("M5");
+    lines.push(
+      "M5",
+      gCodeComment(
+        "Tool change: install the marker cutter and reset Z0 at the centerline, then resume.",
+      ),
+      "M0",
+    );
   }
 
-  lines.push(`S${Math.round(Number(input.markerSpindleRpm))} M3`);
+  lines.push(`S${Math.round(Number(input.markerSpindleRpm))} M3`, ...spindleDwellLines);
 
   for (const marker of markers) {
     lines.push(
@@ -1143,6 +1467,27 @@ function addCutoutSegmentGCode(
   }
 }
 
+// Dwell after starting the spindle so it reaches speed before the first cut.
+const spindleDwellLines = [
+  "(Dwell while the spindle reaches speed)",
+  "G4 P2",
+];
+
+function endProgram(lines: string[], input: FormState) {
+  const parkZ = input.unit === "mm" ? 25 : 1;
+  lines.push(
+    "",
+    gCodeComment(
+      `Park: retract to ${formatNumber(parkZ)} ${input.unit} above Z0 before returning over the origin. Confirm this clears your clamps.`,
+    ),
+    `G0 Z${formatNumber(parkZ)}`,
+    "G0 X0 Y0",
+    "M5",
+    "M30",
+    "%",
+  );
+}
+
 function generateRadiusGCode(
   input: FormState,
   layout: Layout,
@@ -1153,13 +1498,20 @@ function generateRadiusGCode(
   const toolRadius = Number(input.radiusBitDiameter) / 2;
   const yStep = Math.max(Number(input.radiusStepOver), 0.001);
   const pointSpacing = input.unit === "mm" ? 1 : 0.04;
-  const widestCenterHalfSpan =
-    Math.max(outline.nutWidth, outline.endWidth) / 2 - toolRadius;
+  const widestHalfWidth = Math.max(outline.nutWidth, outline.endWidth) / 2;
   const maxSurfaceDepth = radiusSagitta(
     input,
     layout,
-    layout.centerX + Math.max(widestCenterHalfSpan, 0),
+    layout.centerX + widestHalfWidth,
   );
+  // A flat cutter on a convex surface contacts at its inboard edge, not its
+  // center; compensate Z so that edge follows the radius curve exactly.
+  const contactZ = (x: number, passRatio: number) => {
+    const contactOffset = Math.max(Math.abs(x - layout.centerX) - toolRadius, 0);
+    return (
+      -radiusSagitta(input, layout, layout.centerX + contactOffset) * passRatio
+    );
+  };
   const passes = Math.max(
     1,
     Math.ceil(maxSurfaceDepth / Number(input.radiusDepthPerPass)),
@@ -1177,6 +1529,8 @@ function generateRadiusGCode(
     gCodeComment("Coordinate assumption: X0 Y0 is the lower-left front corner of the material."),
     gCodeComment("Z0 is the flat top surface at the fretboard centerline before radiusing."),
     gCodeComment("Final centerline remains at Z0 and the edges are cut down by the radius sagitta."),
+    gCodeComment("Z is compensated so the cutter's inside edge follows the radius curve exactly."),
+    gCodeComment("Rows overhang the board outline by the bit radius; adjacent waste is surfaced down by the edge drop."),
     gCodeComment("Run this program before cutting fret slots or marker pockets."),
     gCodeComment(`Fretboard top radius: ${formatNumber(input.fretboardRadius)} ${input.unit}`),
     gCodeComment(`Maximum edge removal: ${formatNumber(maxSurfaceDepth)} ${input.unit}`),
@@ -1189,6 +1543,7 @@ function generateRadiusGCode(
     "G54",
     `G0 Z${formatNumber(safeZ)}`,
     `S${Math.round(Number(input.radiusSpindleRpm))} M3`,
+    ...spindleDwellLines,
   ];
 
   for (let pass = 1; pass <= passes; pass += 1) {
@@ -1206,14 +1561,11 @@ function generateRadiusGCode(
     for (let row = 0; row <= rowCount; row += 1) {
       const y = Math.min(outline.startY + row * yStep, outline.endY);
       const width = fretboardOutlineWidthAtY(outline, y);
-      const centerHalfSpan = width / 2 - toolRadius;
-
-      if (centerHalfSpan <= 0) {
-        continue;
-      }
-
-      const leftX = layout.centerX - centerHalfSpan;
-      const rightX = layout.centerX + centerHalfSpan;
+      // Travel one tool radius past each board edge so the inboard cutting
+      // edge reaches the full edge-drop depth at the outline.
+      const travelHalfSpan = width / 2 + toolRadius;
+      const leftX = layout.centerX - travelHalfSpan;
+      const rightX = layout.centerX + travelHalfSpan;
       const startX = row % 2 === 0 ? leftX : rightX;
       const endX = row % 2 === 0 ? rightX : leftX;
       const sampleCount = Math.max(
@@ -1225,14 +1577,14 @@ function generateRadiusGCode(
       lines.push(`G0 X${formatNumber(startX)} Y${formatNumber(y)}`);
       lines.push(
         `G1 Z${formatNumber(
-          -radiusSagitta(input, layout, startX) * passRatio,
+          contactZ(startX, passRatio),
         )} F${formatNumber(input.radiusPlungeRate)}`,
       );
 
       for (let index = 1; index <= sampleCount; index += 1) {
         const ratio = index / sampleCount;
         const x = startX + (endX - startX) * ratio;
-        const z = -radiusSagitta(input, layout, x) * passRatio;
+        const z = contactZ(x, passRatio);
         lines.push(
           `G1 X${formatNumber(x)} Y${formatNumber(y)} Z${formatNumber(
             z,
@@ -1242,7 +1594,7 @@ function generateRadiusGCode(
     }
   }
 
-  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  endProgram(lines, input);
   return lines.join("\n");
 }
 
@@ -1283,6 +1635,7 @@ function generateCutoutGCode(
     "G54",
     `G0 Z${formatNumber(safeZ)}`,
     `S${Math.round(Number(input.cutoutSpindleRpm))} M3`,
+    ...spindleDwellLines,
   ];
 
   if (input.cutoutTabsEnabled) {
@@ -1333,7 +1686,7 @@ function generateCutoutGCode(
     }
   }
 
-  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  endProgram(lines, input);
   return lines.join("\n");
 }
 
@@ -1369,6 +1722,7 @@ function generateGCode(
     "G54",
     `G0 Z${formatNumber(safeZ)}`,
     `S${Math.round(input.spindleRpm)} M3`,
+    ...spindleDwellLines,
   ];
 
   for (const slot of layout.slots) {
@@ -1415,7 +1769,7 @@ function generateGCode(
     addMarkerOperationGCode(lines, input, layout, markers, safeZ, true);
   }
 
-  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  endProgram(lines, input);
   return lines.join("\n");
 }
 
@@ -1449,8 +1803,17 @@ function generateMarkerGCode(
 
   addMarkerOperationGCode(lines, input, layout, markers, safeZ, false);
 
-  lines.push("", `G0 Z${formatNumber(safeZ)}`, "G0 X0 Y0", "M5", "M30", "%");
+  endProgram(lines, input);
   return lines.join("\n");
+}
+
+function reportExportError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return;
+  }
+  window.alert(
+    error instanceof Error ? error.message : "Failed to generate the G-code file.",
+  );
 }
 
 async function saveGCode(
@@ -1601,6 +1964,54 @@ const slotFields: FieldGroup["fields"] = [
   { key: "spindleRpm", label: "Slot spindle RPM", step: "1", min: "0" },
 ];
 
+function FieldLabel({
+  label,
+  description,
+}: {
+  label: string;
+  description?: string;
+}) {
+  const [tooltip, setTooltip] = useState<{
+    left: number;
+    top: number;
+    below: boolean;
+  } | null>(null);
+
+  if (!description) {
+    return <span>{label}</span>;
+  }
+
+  return (
+    <span className="inline-flex w-fit items-center">
+      <span
+        className="cursor-help underline decoration-[#9fb3bd] decoration-dotted underline-offset-4"
+        onMouseEnter={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const below = rect.top < 140;
+          setTooltip({
+            left: clamp(rect.left, 8, Math.max(window.innerWidth - 280, 8)),
+            top: below ? rect.bottom + 8 : rect.top - 8,
+            below,
+          });
+        }}
+        onMouseLeave={() => setTooltip(null)}
+      >
+        {label}
+      </span>
+      {tooltip ? (
+        <span
+          className={`pointer-events-none fixed z-50 w-[264px] rounded-md border border-[#39474e] bg-[#1f2523] px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-white shadow-lg ${
+            tooltip.below ? "" : "-translate-y-full"
+          }`}
+          style={{ left: tooltip.left, top: tooltip.top }}
+        >
+          {description}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function CollapsiblePanel({
   title,
   stepLabel,
@@ -1680,6 +2091,66 @@ export default function Home() {
   const [form, setForm] = useState<FormState>(defaultMetricState);
   const [fileExtension, setFileExtension] =
     useState<GCodeFileExtension>(".nc");
+  const [highlightTarget, setHighlightTarget] =
+    useState<HighlightTarget | null>(null);
+  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+  const [profileName, setProfileName] = useState("");
+  const [isStorageLoaded, setIsStorageLoaded] = useState(false);
+
+  // Restoring after mount keeps the static prerender free of hydration
+  // mismatches; storage values only exist in the browser.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    try {
+      const storedSession = window.localStorage.getItem(lastSessionStorageKey);
+      if (storedSession) {
+        const parsedSession = JSON.parse(storedSession) as Record<string, unknown>;
+        const restoredForm = sanitizeFormState(parsedSession.form);
+        const restoredExtension = sanitizeFileExtension(parsedSession.fileExtension);
+        if (restoredForm) {
+          setForm(restoredForm);
+        }
+        if (restoredExtension) {
+          setFileExtension(restoredExtension);
+        }
+      }
+
+      const storedProfiles = window.localStorage.getItem(profilesStorageKey);
+      if (storedProfiles) {
+        setProfiles(sanitizeProfiles(JSON.parse(storedProfiles)));
+      }
+    } catch {
+      // Ignore unreadable storage and fall back to defaults.
+    }
+    setIsStorageLoaded(true);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (!isStorageLoaded) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        lastSessionStorageKey,
+        JSON.stringify({ form, fileExtension }),
+      );
+    } catch {
+      // Storage may be full or blocked; keep the app usable.
+    }
+  }, [form, fileExtension, isStorageLoaded]);
+
+  useEffect(() => {
+    if (!isStorageLoaded) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(profilesStorageKey, JSON.stringify(profiles));
+    } catch {
+      // Storage may be full or blocked; keep the app usable.
+    }
+  }, [profiles, isStorageLoaded]);
+
   const layout = useMemo(() => calculateLayout(form), [form]);
   const fretboardOutline = useMemo(
     () => calculateFretboardOutline(form, layout),
@@ -1841,6 +2312,18 @@ export default function Home() {
     });
   }
 
+  function fieldHoverProps(key: string) {
+    const target = fieldHighlightTargets[key];
+    if (!target) {
+      return {};
+    }
+
+    return {
+      onMouseEnter: () => setHighlightTarget(target),
+      onMouseLeave: () => setHighlightTarget(null),
+    };
+  }
+
   function updateBooleanField(key: keyof FormState, value: boolean) {
     setForm((current) => ({
       ...current,
@@ -1864,16 +2347,43 @@ export default function Home() {
     });
   }
 
+  function handleSaveProfile() {
+    const name = profileName.trim();
+    if (!name) {
+      return;
+    }
+
+    setProfiles((current) => {
+      const next = current.filter((profile) => profile.name !== name);
+      next.push({ name, form, fileExtension });
+      return next.sort((a, b) => a.name.localeCompare(b.name));
+    });
+  }
+
+  function handleLoadProfile(profile: SavedProfile) {
+    setForm(profile.form);
+    setFileExtension(profile.fileExtension);
+    setProfileName(profile.name);
+  }
+
+  function handleDeleteProfile(name: string) {
+    setProfiles((current) => current.filter((profile) => profile.name !== name));
+  }
+
   async function handleGenerate() {
     if (!canGenerate) {
       return;
     }
 
-    await saveGCode(
-      generateGCode(form, layout, fileExtension),
-      fileExtension,
-      "fret-slots",
-    );
+    try {
+      await saveGCode(
+        generateGCode(form, layout, fileExtension),
+        fileExtension,
+        "fret-slots",
+      );
+    } catch (error) {
+      reportExportError(error);
+    }
   }
 
   async function handleGenerateCutout() {
@@ -1881,11 +2391,15 @@ export default function Home() {
       return;
     }
 
-    await saveGCode(
-      generateCutoutGCode(form, layout, fileExtension),
-      fileExtension,
-      "fretboard-cutout",
-    );
+    try {
+      await saveGCode(
+        generateCutoutGCode(form, layout, fileExtension),
+        fileExtension,
+        "fretboard-cutout",
+      );
+    } catch (error) {
+      reportExportError(error);
+    }
   }
 
   async function handleGenerateRadius() {
@@ -1893,11 +2407,15 @@ export default function Home() {
       return;
     }
 
-    await saveGCode(
-      generateRadiusGCode(form, layout, fileExtension),
-      fileExtension,
-      "fretboard-radius",
-    );
+    try {
+      await saveGCode(
+        generateRadiusGCode(form, layout, fileExtension),
+        fileExtension,
+        "fretboard-radius",
+      );
+    } catch (error) {
+      reportExportError(error);
+    }
   }
 
   async function handleGenerateMarkers() {
@@ -1905,15 +2423,85 @@ export default function Home() {
       return;
     }
 
-    await saveGCode(
-      generateMarkerGCode(form, layout, fileExtension),
-      fileExtension,
-      "fretboard-markers",
-    );
+    try {
+      await saveGCode(
+        generateMarkerGCode(form, layout, fileExtension),
+        fileExtension,
+        "fretboard-markers",
+      );
+    } catch (error) {
+      reportExportError(error);
+    }
   }
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-[#1f2523]">
+      <nav className="sticky top-0 z-40 border-b border-[#c7d1d8] bg-white shadow-sm">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-4 py-2 sm:px-6 lg:px-8">
+          <span className="shrink-0 text-xs font-bold uppercase tracking-[0.12em] text-[#8a4f1f]">
+            Cut profiles
+          </span>
+          <input
+            className="h-9 w-44 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+            type="text"
+            placeholder='Name, e.g. "Fretboard 1"'
+            value={profileName}
+            onChange={(event) => setProfileName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleSaveProfile();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="h-9 shrink-0 rounded-md bg-[#19695f] px-3 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+            disabled={!profileName.trim()}
+            onClick={handleSaveProfile}
+          >
+            {profiles.some((profile) => profile.name === profileName.trim())
+              ? "Update"
+              : "Save"}
+          </button>
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1">
+            {profiles.length === 0 ? (
+              <span className="whitespace-nowrap text-xs text-[#77838a]">
+                No saved profiles yet — name and save your current setup.
+              </span>
+            ) : (
+              profiles.map((profile) => (
+                <span
+                  key={profile.name}
+                  className="flex shrink-0 items-stretch overflow-hidden rounded-md border border-[#c7d1d8] bg-[#f7fafb]"
+                >
+                  <button
+                    type="button"
+                    className="max-w-48 truncate px-3 py-1.5 text-sm font-semibold text-[#26302f] transition hover:bg-[#e8eef2]"
+                    title={`Load "${profile.name}" (${
+                      profile.form.unit
+                    }, ${numberFormatter.format(
+                      Number(profile.form.scaleLength) || 0,
+                    )} scale)`}
+                    onClick={() => handleLoadProfile(profile)}
+                  >
+                    {profile.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="border-l border-[#d6dde2] px-2 text-sm font-semibold text-[#77838a] transition hover:bg-[#fbeae6] hover:text-[#a94432]"
+                    aria-label={`Delete profile ${profile.name}`}
+                    title={`Delete "${profile.name}"`}
+                    onClick={() => handleDeleteProfile(profile.name)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </nav>
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
         <section className="grid gap-5 lg:grid-cols-[minmax(330px,420px)_1fr]">
           <div className="flex flex-col gap-4">
@@ -1976,8 +2564,12 @@ export default function Home() {
                           <label
                             key={field.key}
                             className="grid gap-1 text-sm font-medium text-[#26302f]"
+                            {...fieldHoverProps(field.key)}
                           >
-                            <span>{field.label}</span>
+                            <FieldLabel
+                              label={field.label}
+                              description={fieldDescriptions[field.key]}
+                            />
                             <input
                               className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                               type="number"
@@ -2012,8 +2604,12 @@ export default function Home() {
                     <label
                       key={field.key}
                       className="grid gap-1 text-sm font-medium text-[#26302f]"
+                      {...fieldHoverProps(field.key)}
                     >
-                      <span>{field.label}</span>
+                      <FieldLabel
+                              label={field.label}
+                              description={fieldDescriptions[field.key]}
+                            />
                       <input
                         className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                         type="number"
@@ -2050,8 +2646,9 @@ export default function Home() {
                     <label
                       key={key}
                       className="grid gap-1 text-sm font-medium text-[#26302f]"
+                      {...fieldHoverProps(key)}
                     >
-                      <span>{label}</span>
+                      <FieldLabel label={label} description={fieldDescriptions[key]} />
                       <input
                         className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                         type="number"
@@ -2065,7 +2662,10 @@ export default function Home() {
                     </label>
                   ))}
 
-                  <label className="flex items-center gap-2 text-sm font-semibold text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                  <label
+                    className="flex items-center gap-2 text-sm font-semibold text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2"
+                    {...fieldHoverProps("cutoutTabsEnabled")}
+                  >
                     <input
                       className="h-4 w-4 accent-[#19695f]"
                       type="checkbox"
@@ -2077,7 +2677,10 @@ export default function Home() {
                         )
                       }
                     />
-                    Leave holding tabs
+                    <FieldLabel
+                      label="Leave holding tabs"
+                      description={fieldDescriptions.cutoutTabsEnabled}
+                    />
                   </label>
 
                   {[
@@ -2088,8 +2691,9 @@ export default function Home() {
                     <label
                       key={key}
                       className="grid gap-1 text-sm font-medium text-[#26302f]"
+                      {...fieldHoverProps(key)}
                     >
-                      <span>{label}</span>
+                      <FieldLabel label={label} description={fieldDescriptions[key]} />
                       <input
                         className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20 disabled:bg-[#eef2f4] disabled:text-[#77838a]"
                         type="number"
@@ -2129,8 +2733,9 @@ export default function Home() {
                     <label
                       key={key}
                       className="grid gap-1 text-sm font-medium text-[#26302f]"
+                      {...fieldHoverProps(key)}
                     >
-                      <span>{label}</span>
+                      <FieldLabel label={label} description={fieldDescriptions[key]} />
                       <input
                         className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                         type="number"
@@ -2157,7 +2762,10 @@ export default function Home() {
                   Uses the shared fret positions and fretboard radius. These marker settings are
                   only required for marker exports or when including markers with fret slots.
                 </div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-[#26302f]">
+                <label
+                  className="flex items-center gap-2 text-sm font-semibold text-[#26302f]"
+                  {...fieldHoverProps("markersEnabled")}
+                >
                   <input
                     className="h-4 w-4 accent-[#19695f]"
                     type="checkbox"
@@ -2166,12 +2774,21 @@ export default function Home() {
                       updateBooleanField("markersEnabled", event.target.checked)
                     }
                   />
-                  Include marker pockets
+                  <FieldLabel
+                    label="Include marker pockets"
+                    description={fieldDescriptions.markersEnabled}
+                  />
                 </label>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  <label className="grid gap-1 text-sm font-medium text-[#26302f]">
-                    <span>Marker shape</span>
+                  <label
+                    className="grid gap-1 text-sm font-medium text-[#26302f]"
+                    {...fieldHoverProps("markerShape")}
+                  >
+                    <FieldLabel
+                      label="Marker shape"
+                      description={fieldDescriptions.markerShape}
+                    />
                     <select
                       className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                       value={form.markerShape}
@@ -2186,8 +2803,14 @@ export default function Home() {
                     </select>
                   </label>
 
-                  <label className="grid gap-1 text-sm font-medium text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2">
-                    <span>Marker map</span>
+                  <label
+                    className="grid gap-1 text-sm font-medium text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2"
+                    {...fieldHoverProps("markerFrets")}
+                  >
+                    <FieldLabel
+                      label="Marker map"
+                      description={fieldDescriptions.markerFrets}
+                    />
                     <input
                       className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                       type="text"
@@ -2198,9 +2821,15 @@ export default function Home() {
                     />
                   </label>
 
-                  <div className="grid gap-2 sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                  <div
+                    className="grid gap-2 sm:col-span-2 lg:col-span-1 xl:col-span-2"
+                    {...fieldHoverProps("fretSpaceMarkers")}
+                  >
                     <div className="text-sm font-semibold text-[#26302f]">
-                      Fret space markers
+                      <FieldLabel
+                        label="Fret space markers"
+                        description={fieldDescriptions.fretSpaceMarkers}
+                      />
                     </div>
                     <div className="grid grid-cols-[repeat(auto-fit,minmax(92px,1fr))] gap-2">
                       {Array.from({ length: Math.max(form.fretCount, 0) }, (_, index) => {
@@ -2254,8 +2883,9 @@ export default function Home() {
                     <label
                       key={key}
                       className="grid gap-1 text-sm font-medium text-[#26302f]"
+                      {...fieldHoverProps(key)}
                     >
-                      <span>{label}</span>
+                      <FieldLabel label={label} description={fieldDescriptions[key]} />
                       <input
                         className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
                         type="number"
@@ -2272,7 +2902,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-col gap-5">
+          <div className="flex min-w-0 flex-col gap-5 [&>*]:shrink-0 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
             <CollapsiblePanel
               title="Cutout And Slot Preview"
               stepLabel="Preview"
@@ -2295,9 +2925,11 @@ export default function Home() {
                   y={svgNumber(preview.originY)}
                   width={svgNumber(preview.drawingWidth)}
                   height={svgNumber(preview.drawingHeight)}
-                  fill="#e9eef2"
-                  stroke="#60717b"
-                  strokeWidth="2"
+                  fill={highlightTarget === "material" ? "#fdeede" : "#e9eef2"}
+                  stroke={
+                    highlightTarget === "material" ? highlightColor : "#60717b"
+                  }
+                  strokeWidth={highlightTarget === "material" ? "4" : "2"}
                 />
                 <polygon
                   points={fretboardOutline.points
@@ -2313,8 +2945,10 @@ export default function Home() {
                     )
                     .join(" ")}
                   fill="#dcebe2"
-                  stroke="#19695f"
-                  strokeWidth="2"
+                  stroke={
+                    highlightTarget === "outline" ? highlightColor : "#19695f"
+                  }
+                  strokeWidth={highlightTarget === "outline" ? "4" : "2"}
                 />
                 <polygon
                   points={fretboardOutline.cutterPath
@@ -2330,9 +2964,11 @@ export default function Home() {
                     )
                     .join(" ")}
                   fill="none"
-                  stroke="#1f2523"
+                  stroke={
+                    highlightTarget === "cutterPath" ? highlightColor : "#1f2523"
+                  }
                   strokeDasharray="5 5"
-                  strokeWidth="1.5"
+                  strokeWidth={highlightTarget === "cutterPath" ? "3" : "1.5"}
                 />
                 <line
                   x1={svgNumber(preview.originX + preview.drawingWidth / 2)}
@@ -2360,8 +2996,10 @@ export default function Home() {
                         layout.nutY * preview.scaleY,
                     )
                   }
-                  stroke="#19695f"
-                  strokeWidth="2"
+                  stroke={
+                    highlightTarget === "slots" ? highlightColor : "#19695f"
+                  }
+                  strokeWidth={highlightTarget === "slots" ? "3" : "2"}
                 />
                 {layout.slots.map((slot) => (
                   <line
@@ -2378,8 +3016,10 @@ export default function Home() {
                         preview.drawingHeight -
                         slot.y * preview.scaleY,
                     )}
-                    stroke="#c2412e"
-                    strokeWidth="2"
+                    stroke={
+                      highlightTarget === "slots" ? highlightColor : "#c2412e"
+                    }
+                    strokeWidth={highlightTarget === "slots" ? "3.5" : "2"}
                     strokeLinecap="round"
                   />
                 ))}
@@ -2397,9 +3037,17 @@ export default function Home() {
                         (Number(form.markerWidth) / 2) *
                           Math.min(preview.scaleX, preview.scaleY),
                       )}
-                      fill="#f4d35e"
-                      stroke="#8a4f1f"
-                      strokeWidth="1.5"
+                      fill={
+                        highlightTarget === "markers" ? "#ffd34d" : "#f4d35e"
+                      }
+                      stroke={
+                        highlightTarget === "markers"
+                          ? highlightColor
+                          : "#8a4f1f"
+                      }
+                      strokeWidth={
+                        highlightTarget === "markers" ? "3" : "1.5"
+                      }
                     />
                   ) : (
                     <polygon
@@ -2416,9 +3064,17 @@ export default function Home() {
                             )}`,
                         )
                         .join(" ")}
-                      fill="#f4d35e"
-                      stroke="#8a4f1f"
-                      strokeWidth="1.5"
+                      fill={
+                        highlightTarget === "markers" ? "#ffd34d" : "#f4d35e"
+                      }
+                      stroke={
+                        highlightTarget === "markers"
+                          ? highlightColor
+                          : "#8a4f1f"
+                      }
+                      strokeWidth={
+                        highlightTarget === "markers" ? "3" : "1.5"
+                      }
                     />
                   ),
                 )}
@@ -2486,10 +3142,12 @@ export default function Home() {
                     .map((point) => `${svgNumber(point.x)},${svgNumber(point.y)}`)
                     .join(" ")}
                   fill="none"
-                  stroke="#19695f"
+                  stroke={
+                    highlightTarget === "radius" ? highlightColor : "#19695f"
+                  }
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth="4"
+                  strokeWidth={highlightTarget === "radius" ? "6" : "4"}
                 />
                 <line
                   x1={svgNumber(radiusPreview.centerX)}
@@ -2595,7 +3253,10 @@ export default function Home() {
                     className="grid gap-1 text-sm font-semibold text-[#26302f]"
                     htmlFor="gcode-file-extension"
                   >
-                    <span>Downloaded file extension</span>
+                    <FieldLabel
+                      label="Downloaded file extension"
+                      description={fieldDescriptions.fileExtension}
+                    />
                     <select
                       id="gcode-file-extension"
                       className="h-11 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm font-semibold text-[#26302f] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
