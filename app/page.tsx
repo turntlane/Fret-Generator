@@ -380,68 +380,6 @@ const fieldDescriptions: Record<string, string> = {
     "File extension used for the downloaded program. The G-code content is the same; pick the extension your machine controller expects.",
 };
 
-type HighlightTarget =
-  | "material"
-  | "outline"
-  | "cutterPath"
-  | "slots"
-  | "markers"
-  | "radius";
-
-const highlightColor = "#e07b00";
-
-const fieldHighlightTargets: Record<string, HighlightTarget> = {
-  scaleLength: "slots",
-  fretCount: "slots",
-  nutStringSpread: "outline",
-  bridgeStringSpread: "outline",
-  fretboardOverhang: "outline",
-  fretboardRadius: "radius",
-  nutEndMargin: "outline",
-  lastFretEndMargin: "outline",
-  materialWidth: "material",
-  materialLength: "material",
-  materialThickness: "material",
-  fretInset: "slots",
-  bitDiameter: "slots",
-  slotDepth: "slots",
-  feedRate: "slots",
-  depthPerPass: "slots",
-  spindleRpm: "slots",
-  cutoutBitDiameter: "cutterPath",
-  cutoutDepth: "cutterPath",
-  cutoutDepthPerPass: "cutterPath",
-  cutoutFeedRate: "cutterPath",
-  cutoutPlungeRate: "cutterPath",
-  cutoutSpindleRpm: "cutterPath",
-  cutoutAllowance: "cutterPath",
-  cutoutTabsEnabled: "cutterPath",
-  tabCount: "cutterPath",
-  tabWidth: "cutterPath",
-  tabHeight: "cutterPath",
-  radiusBitDiameter: "radius",
-  radiusStepOver: "radius",
-  radiusDepthPerPass: "radius",
-  radiusFeedRate: "radius",
-  radiusPlungeRate: "radius",
-  radiusSpindleRpm: "radius",
-  markersEnabled: "markers",
-  markerShape: "markers",
-  markerFrets: "markers",
-  fretSpaceMarkers: "markers",
-  markerWidth: "markers",
-  markerLength: "markers",
-  markerTopWidth: "markers",
-  markerDepth: "markers",
-  markerDepthPerPass: "markers",
-  markerBitDiameter: "markers",
-  markerFeedRate: "markers",
-  markerPlungeRate: "markers",
-  markerSpindleRpm: "markers",
-  markerXOffset: "markers",
-  doubleMarkerSpacing: "markers",
-};
-
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
@@ -1978,13 +1916,17 @@ function FieldLabel({
   } | null>(null);
 
   if (!description) {
-    return <span>{label}</span>;
+    return (
+      <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#6e6354]">
+        {label}
+      </span>
+    );
   }
 
   return (
-    <span className="inline-flex w-fit items-center">
+    <span className="inline-flex w-fit items-center text-[11px] font-bold uppercase tracking-[0.08em] text-[#6e6354]">
       <span
-        className="cursor-help underline decoration-[#9fb3bd] decoration-dotted underline-offset-4"
+        className="cursor-help underline decoration-[#8d7f63] decoration-dotted underline-offset-4"
         onMouseEnter={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           const below = rect.top < 140;
@@ -2000,7 +1942,7 @@ function FieldLabel({
       </span>
       {tooltip ? (
         <span
-          className={`pointer-events-none fixed z-50 w-[264px] rounded-md border border-[#39474e] bg-[#1f2523] px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-white shadow-lg ${
+          className={`pointer-events-none fixed z-50 w-[264px] rounded-none border border-[#43361f] bg-[#2b2620] px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-white shadow-lg ${
             tooltip.below ? "" : "-translate-y-full"
           }`}
           style={{ left: tooltip.left, top: tooltip.top }}
@@ -2012,78 +1954,134 @@ function FieldLabel({
   );
 }
 
-function CollapsiblePanel({
+/* A rotated ink stamp, e.g. SHARED / OP 1 / READY */
+function Stamp({
+  label,
+  tone = "red",
+  tilt = -1,
+}: {
+  label: string;
+  tone?: "red" | "green";
+  tilt?: number;
+}) {
+  const color = tone === "green" ? "#1f6e54" : "#9b3b2a";
+  return (
+    <span
+      className="inline-block whitespace-nowrap border-[1.5px] border-current px-1.5 py-[2px] text-[10px] font-bold uppercase tracking-[0.12em]"
+      style={{ color, transform: `rotate(${tilt}deg)` }}
+    >
+      {label}
+    </span>
+  );
+}
+
+/* Sub-group divider label inside a panel (e.g. SCALE & FRETS) */
+function SubLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="border-b border-dotted border-[#b4a585] pb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#6e6354]">
+      {children}
+    </div>
+  );
+}
+
+/* Worksheet panel: "N · TITLE" header in Oswald with an op stamp, collapsible. */
+function Panel({
+  number,
   title,
-  stepLabel,
-  summary,
+  stamp,
+  stampTone = "red",
+  note,
   defaultOpen = true,
-  accent = "teal",
   actions,
   children,
 }: {
+  number?: string;
   title: string;
-  stepLabel: string;
-  summary: string;
+  stamp?: string;
+  stampTone?: "red" | "green";
+  note?: string;
   defaultOpen?: boolean;
-  accent?: "teal" | "blue" | "brown" | "slate";
   actions?: ReactNode;
   children: ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  const accentClasses = {
-    teal: {
-      border: "border-l-[#19695f]",
-      badge: "bg-[#dcebe2] text-[#14544c]",
-      button: "text-[#14544c]",
-    },
-    blue: {
-      border: "border-l-[#2f5d7c]",
-      badge: "bg-[#e1ecf4] text-[#264c66]",
-      button: "text-[#264c66]",
-    },
-    brown: {
-      border: "border-l-[#8a4f1f]",
-      badge: "bg-[#f4e6d8] text-[#724018]",
-      button: "text-[#724018]",
-    },
-    slate: {
-      border: "border-l-[#60717b]",
-      badge: "bg-[#e8eef2] text-[#39474e]",
-      button: "text-[#39474e]",
-    },
-  }[accent];
 
   return (
-    <section
-      className={`overflow-hidden rounded-lg border border-[#c7d1d8] border-l-4 ${accentClasses.border} bg-white shadow-sm`}
-    >
-      <div className="grid gap-3 border-b border-[#d6dde2] bg-[#f9fbfc] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+    <section className="rounded-none border-2 border-[#2b2620] bg-[#faf4e4]">
+      <div className="flex items-center gap-2.5 border-b-2 border-[#2b2620] px-3 py-2">
         <button
           type="button"
-          className="grid min-w-0 gap-1 text-left"
+          className="flex min-w-0 flex-1 items-baseline gap-2.5 text-left"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
         >
-          <span
-            className={`w-fit rounded-[4px] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.12em] ${accentClasses.badge}`}
-          >
-            {stepLabel}
+          <span className="shrink-0 font-[family-name:var(--font-display)] text-base font-semibold uppercase tracking-[0.08em] text-[#2b2620]">
+            {number ? `${number} · ${title}` : title}
           </span>
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="text-lg font-semibold text-[#1f2523]">{title}</span>
-            <span
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] border border-[#c7d1d8] bg-white text-sm font-bold ${accentClasses.button}`}
-              aria-hidden="true"
-            >
-              {isOpen ? "-" : "+"}
+          {note ? (
+            <span className="hidden truncate text-xs normal-case text-[#6e6354] sm:inline">
+              {note}
             </span>
-          </span>
-          <span className="text-sm leading-snug text-[#53616a]">{summary}</span>
+          ) : null}
         </button>
-        {actions ? <div className="sm:justify-self-end">{actions}</div> : null}
+        {actions ? <div className="shrink-0">{actions}</div> : null}
+        {stamp ? <Stamp label={stamp} tone={stampTone} /> : null}
+        <button
+          type="button"
+          aria-label={isOpen ? "Collapse" : "Expand"}
+          onClick={() => setIsOpen((current) => !current)}
+          className="flex h-5 w-5 shrink-0 items-center justify-center border border-[#8d7f63] text-sm font-bold text-[#6e6354]"
+        >
+          {isOpen ? "–" : "+"}
+        </button>
       </div>
       {isOpen ? <div className="p-3">{children}</div> : null}
     </section>
+  );
+}
+
+/* A single worksheet input: tiny uppercase label over an underline field. */
+function WorksheetField({
+  fieldKey,
+  label,
+  value,
+  onChange,
+  type = "number",
+  min,
+  step,
+  description,
+  disabled = false,
+  wide = false,
+}: {
+  fieldKey: keyof FormState;
+  label: string;
+  value: string | number;
+  onChange: (key: keyof FormState, value: string) => void;
+  type?: "number" | "text";
+  min?: string;
+  step?: string;
+  description?: string;
+  disabled?: boolean;
+  wide?: boolean;
+}) {
+  return (
+    <label
+      data-h={fieldKey}
+      className={`grid gap-0.5 rounded-none p-1 [margin:-4px] ${
+        wide ? "col-span-full" : ""
+      }`}
+    >
+      <FieldLabel label={label} description={description} />
+      <input
+        type={type}
+        min={min}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(fieldKey, event.target.value)}
+        className="w-full rounded-none border-0 border-b-[1.5px] border-[#8d7f63] bg-transparent px-0 py-0.5 text-[15px] text-[#2b2620] outline-none transition focus:border-[#1f6e54] disabled:opacity-40"
+      />
+    </label>
   );
 }
 
@@ -2091,11 +2089,46 @@ export default function Home() {
   const [form, setForm] = useState<FormState>(defaultMetricState);
   const [fileExtension, setFileExtension] =
     useState<GCodeFileExtension>(".nc");
-  const [highlightTarget, setHighlightTarget] =
-    useState<HighlightTarget | null>(null);
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [profileName, setProfileName] = useState("");
   const [isStorageLoaded, setIsStorageLoaded] = useState(false);
+
+  // Hover-to-dimension: hovering any [data-h] field adds .on to every drawing
+  // node + dimension callout whose space-separated data-g list contains its key.
+  useEffect(() => {
+    let current: Element | null = null;
+    let lit: Element[] = [];
+    const clear = () => {
+      lit.forEach((el) => el.classList.remove("on"));
+      lit = [];
+      current = null;
+    };
+    const onOver = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      const field = target?.closest?.("[data-h]") ?? null;
+      if (field === current) {
+        return;
+      }
+      clear();
+      if (!field) {
+        return;
+      }
+      current = field;
+      const key = field.getAttribute("data-h");
+      if (!key) {
+        return;
+      }
+      lit = Array.from(document.querySelectorAll("[data-g]")).filter((el) =>
+        (el.getAttribute("data-g") ?? "").split(" ").includes(key),
+      );
+      lit.forEach((el) => el.classList.add("on"));
+    };
+    document.addEventListener("mouseover", onOver);
+    return () => {
+      document.removeEventListener("mouseover", onOver);
+      clear();
+    };
+  }, []);
 
   // Restoring after mount keeps the static prerender free of hydration
   // mismatches; storage values only exist in the browser.
@@ -2206,75 +2239,208 @@ export default function Home() {
     { label: "Markers Only", validation: markerExportValidation },
   ];
 
-  const preview = useMemo(() => {
-    const width = 720;
-    const height = 420;
-    const pad = 24;
-    const materialRatio = form.materialWidth / form.materialLength;
-    const drawingHeight = height - pad * 2;
-    const drawingWidth = Math.min(width - pad * 2, drawingHeight * materialRatio);
-    const originX = (width - drawingWidth) / 2;
-    const originY = pad;
-    const scaleX = drawingWidth / form.materialWidth;
-    const scaleY = drawingHeight / form.materialLength;
+  // DWG 1 — plan view: stock laid horizontally (nut -> heel), board outline,
+  // cutter path + tabs, fret slots, markers, origin, and hover dimension
+  // callouts. All geometry is recomputed live from the real form values.
+  const topGeom = useMemo(() => {
+    const u = form.unit;
+    const fmt = (v: number) => numberFormatter.format(v);
+    const outline = fretboardOutline;
+    const matL = Math.max(Number(form.materialLength) || 1, 0.001);
+    const matW = Math.max(Number(form.materialWidth) || 1, 0.001);
+    const left = 50;
+    const right = 950;
+    const top = 62;
+    const bottom = 188;
+    const hs = (right - left) / matL;
+    const vs = (bottom - top) / matW;
+    const cX = matW / 2;
+    const X = (yMM: number) => left + yMM * hs;
+    const Y = (xMM: number) => top + (matW - xMM) * vs;
 
-    return {
-      width,
-      height,
-      drawingWidth,
-      drawingHeight,
-      originX,
-      originY,
-      scaleX,
-      scaleY,
-    };
-  }, [form.materialLength, form.materialWidth]);
+    const nutY = layout.nutY;
+    const startY = outline.startY;
+    const endY = outline.endY;
 
-  const radiusPreview = useMemo(() => {
-    const width = 720;
-    const height = 220;
-    const padX = 44;
-    const topY = 48;
-    const bottomY = 166;
-    const boardWidth = Math.max(fretboardOutline.nutWidth, fretboardOutline.endWidth);
-    const halfBoardWidth = boardWidth / 2;
-    const usableWidth = width - padX * 2;
-    const xScale = usableWidth / Math.max(boardWidth, 0.000001);
-    const edgeDrop =
-      halfBoardWidth < Number(form.fretboardRadius)
-        ? radiusSagitta(form, layout, layout.centerX + halfBoardWidth)
-        : 0;
-    const zScale = edgeDrop > 0 ? (bottomY - topY) / edgeDrop : 1;
-    const centerX = width / 2;
-    const points = Array.from({ length: 65 }, (_, index) => {
-      const ratio = index / 64;
-      const xFromCenter = -halfBoardWidth + boardWidth * ratio;
-      const sagitta =
-        halfBoardWidth < Number(form.fretboardRadius)
-          ? radiusSagitta(form, layout, layout.centerX + xFromCenter)
-          : 0;
+    const boardPts = outline.points
+      .map((p) => `${svgNumber(X(p.y))},${svgNumber(Y(p.x))}`)
+      .join(" ");
+    const cutPts = outline.cutterPath
+      .map((p) => `${svgNumber(X(p.y))},${svgNumber(Y(p.x))}`)
+      .join(" ");
 
+    const nutHalf = outline.nutWidth / 2;
+    const nut = { x: X(nutY), y1: Y(cX + nutHalf), y2: Y(cX - nutHalf) };
+
+    const nutSpread = Number(form.nutStringSpread);
+    const ratioEnd = clamp((endY - nutY) / Number(form.scaleLength), 0, 1);
+    const endSpread =
+      nutSpread + (Number(form.bridgeStringSpread) - nutSpread) * ratioEnd;
+    const strings = [1, -1].map((side) => ({
+      x1: X(nutY),
+      y1: Y(cX + (side * nutSpread) / 2),
+      x2: X(endY),
+      y2: Y(cX + (side * endSpread) / 2),
+    }));
+
+    const slots = layout.slots.map((s) => {
+      const slotHalf = s.fretboardWidth / 2 - Number(form.fretInset);
+      const boardHalf = fretboardOutlineWidthAtY(outline, s.y) / 2;
       return {
-        x: centerX + xFromCenter * xScale,
-        y: topY + sagitta * zScale,
+        n: s.fret,
+        x: X(s.y),
+        y1: Y(cX + slotHalf),
+        y2: Y(cX - slotHalf),
+        ly: Y(cX + boardHalf) - 6,
       };
     });
-    const verticalExaggeration = zScale / xScale;
+
+    const markerR = Math.max((Number(form.markerWidth) / 2) * ((hs + vs) / 2), 1);
+    const markerEls = markers.map((m) => ({
+      id: m.id,
+      cx: X(m.y),
+      cy: Y(m.centerX),
+      r: markerR,
+      isDot: m.shape === "dot",
+      poly:
+        m.shape === "dot"
+          ? ""
+          : markerPreviewPolygon(form, m)
+              .map((p) => `${svgNumber(X(p.y))},${svgNumber(Y(p.x))}`)
+              .join(" "),
+    }));
+
+    const tabCount = Math.max(0, Math.round(Number(form.tabCount)));
+    const tabEls =
+      form.cutoutTabsEnabled && tabCount > 0
+        ? Array.from({ length: tabCount }, (_, i) => {
+            const yMM = startY + ((endY - startY) * (i + 0.5)) / tabCount;
+            const half = fretboardOutlineWidthAtY(outline, yMM) / 2;
+            const onTop = i % 2 === 0;
+            const w = Math.max(Number(form.tabWidth) * hs, 4);
+            return {
+              x: X(yMM) - w / 2,
+              y: (onTop ? Y(cX + half) : Y(cX - half)) - 3,
+              w,
+              h: 6,
+            };
+          })
+        : [];
+
+    const f12 = layout.slots[Math.min(11, layout.slots.length - 1)];
+    const lastFretY = layout.lastFretY;
 
     return {
-      width,
-      height,
+      left,
+      right,
+      top,
+      bottom,
+      cX,
+      X,
+      Y,
+      boardPts,
+      cutPts,
+      nut,
+      strings,
+      slots,
+      markerEls,
+      tabEls,
+      nutX: X(nutY),
+      startX: X(startY),
+      endX: X(endY),
+      lastFretX: X(lastFretY),
+      f12X: f12 ? X(f12.y) : X(nutY),
+      f12: f12 ?? null,
+      nutSpreadTopY: Y(cX + nutSpread / 2),
+      nutSpreadBotY: Y(cX - nutSpread / 2),
+      endSpreadTopY: Y(cX + endSpread / 2),
+      endSpreadBotY: Y(cX + -endSpread / 2),
+      txt: {
+        matLen: `material length ${fmt(Number(form.materialLength))} ${u}`,
+        width: `width ${fmt(Number(form.materialWidth))}`,
+        scale: f12
+          ? `nut to fret ${f12.fret} = ${fmt(f12.scalePosition)} (half of ${fmt(
+              Number(form.scaleLength),
+            )} ${u} scale)`
+          : `${fmt(Number(form.scaleLength))} ${u} scale`,
+        nutMargin: `nut margin ${fmt(Number(form.nutEndMargin))} ${u}`,
+        endMargin: `end margin ${fmt(Number(form.lastFretEndMargin))} ${u} after fret ${form.fretCount}`,
+        spreadNut: `string spread ${fmt(nutSpread)} at nut`,
+        spreadBridge: `widening to ${fmt(Number(form.bridgeStringSpread))} at bridge`,
+        overhang: `board edge ${fmt(Number(form.fretboardOverhang))} outside the strings, each side`,
+        inset: `slots stop ${fmt(Number(form.fretInset))} ${u} short of each edge`,
+        slots: `${form.fretCount} slots, ${fmt(Number(form.bitDiameter))} ${u} cutter, ${fmt(Number(form.slotDepth))} deep`,
+        markers: `pockets ${fmt(Number(form.markerWidth))} dia, ${fmt(Number(form.markerDepth))} deep`,
+        tabs: `${form.tabCount} holding tabs, ${fmt(Number(form.tabWidth))} wide x ${fmt(Number(form.tabHeight))} tall`,
+      },
+    };
+  }, [form, fretboardOutline, layout, markers]);
+
+  // DWG 2 — section A-A: cross-section of the blank at its widest point with
+  // the top radius arc, surfacing waste, and the fret-slot depth.
+  const sectionGeom = useMemo(() => {
+    const u = form.unit;
+    const fmt = (v: number) => numberFormatter.format(v);
+    const leftX = 80;
+    const rightX = 920;
+    const centerX = 500;
+    const topY = 40;
+    const bottomY = 200;
+    const boardWidth = Math.max(
+      fretboardOutline.nutWidth,
+      fretboardOutline.endWidth,
+    );
+    const halfBoard = boardWidth / 2;
+    const xScale = (rightX - leftX) / Math.max(boardWidth, 0.000001);
+    const edgeDrop =
+      halfBoard < Number(form.fretboardRadius)
+        ? radiusSagitta(form, layout, layout.centerX + halfBoard)
+        : 0;
+    const crownPx = 23.5;
+    const zScale = edgeDrop > 0 ? crownPx / edgeDrop : 0;
+    const points = Array.from({ length: 41 }, (_, i) => {
+      const xFromCenter = -halfBoard + boardWidth * (i / 40);
+      const sag =
+        halfBoard < Number(form.fretboardRadius)
+          ? radiusSagitta(form, layout, layout.centerX + xFromCenter)
+          : 0;
+      return {
+        x: centerX + xFromCenter * xScale,
+        y: topY + sag * zScale,
+      };
+    });
+    const arcPts = points.map((p) => `${svgNumber(p.x)},${svgNumber(p.y)}`).join(" ");
+    const stockPts = `${arcPts} ${rightX},${bottomY} ${leftX},${bottomY}`;
+    const wastePts = `${leftX},${topY} ${rightX},${topY} ${points
+      .slice()
+      .reverse()
+      .map((p) => `${svgNumber(p.x)},${svgNumber(p.y)}`)
+      .join(" ")}`;
+    const slotBottom = topY + 1 + Math.min(Number(form.slotDepth) * 20, bottomY - topY - 12);
+
+    return {
+      leftX,
+      rightX,
+      centerX,
       topY,
       bottomY,
-      centerX,
-      leftX: centerX - halfBoardWidth * xScale,
-      rightX: centerX + halfBoardWidth * xScale,
       boardWidth,
       edgeDrop,
-      verticalExaggeration,
-      points,
+      crownPx,
+      arcPts,
+      stockPts,
+      wastePts,
+      slotBottom,
+      txt: {
+        edgeDrop: `edges drop ${fmt(edgeDrop)} ${u}`,
+        radius: `top follows a ${fmt(Number(form.fretboardRadius))} ${u} radius`,
+        thickness: `${fmt(Number(form.materialThickness))} ${u} thick`,
+        slot: `slot ${fmt(Number(form.slotDepth))} deep, bottom follows the radius (${fmt(Number(form.depthPerPass))}/pass)`,
+        surf: `shaded material removed by the surfacing pass`,
+        caption: `Cross-section at the widest point of the board (${fmt(boardWidth)} ${u}). Vertical slightly exaggerated for clarity.`,
+      },
     };
-  }, [form, fretboardOutline.endWidth, fretboardOutline.nutWidth, layout]);
+  }, [form, fretboardOutline.nutWidth, fretboardOutline.endWidth, layout]);
 
   function updateField(key: keyof FormState, value: string) {
     setForm((current) => {
@@ -2310,18 +2476,6 @@ export default function Home() {
         [key]: Number.isFinite(numericValue) ? numericValue : 0,
       };
     });
-  }
-
-  function fieldHoverProps(key: string) {
-    const target = fieldHighlightTargets[key];
-    if (!target) {
-      return {};
-    }
-
-    return {
-      onMouseEnter: () => setHighlightTarget(target),
-      onMouseLeave: () => setHighlightTarget(null),
-    };
   }
 
   function updateBooleanField(key: keyof FormState, value: boolean) {
@@ -2435,16 +2589,51 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] text-[#1f2523]">
-      <nav className="sticky top-0 z-40 border-b border-[#c7d1d8] bg-white shadow-sm">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-4 py-2 sm:px-6 lg:px-8">
-          <span className="shrink-0 text-xs font-bold uppercase tracking-[0.12em] text-[#8a4f1f]">
-            Cut profiles
+    <main className="min-h-screen bg-[var(--mat)] px-3 py-6 text-[#2b2620] sm:px-6 sm:py-9">
+      <div className="mx-auto w-full max-w-[1480px] rounded-[4px] border border-[#b4a585] bg-[#f2ead7] p-4 shadow-[0_3px_14px_rgba(43,38,32,0.25)] sm:p-7">
+        {/* ---- Masthead ---- */}
+        <header className="flex flex-wrap items-center gap-4 border-y-[3px] border-double border-[#2b2620] px-1 py-3.5">
+          <div className="grid flex-1 gap-0.5">
+            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#6e6354]">
+              Form FB-22 · Rev C · Luthiery Dept.
+            </div>
+            <div className="font-[family-name:var(--font-display)] text-[28px] font-semibold uppercase leading-none tracking-[0.04em] sm:text-[30px]">
+              Fretboard G-Code Builder
+            </div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#9b3b2a]">
+              Surface · Slots · Cutout · Markers
+            </div>
+          </div>
+          <div className="grid justify-items-end gap-1.5">
+            <div className="flex border-2 border-[#2b2620]">
+              {(["mm", "in"] as const).map((unit) => (
+                <button
+                  key={unit}
+                  type="button"
+                  className={`px-4 py-1.5 text-[13px] font-bold uppercase tracking-[0.1em] transition ${
+                    form.unit === unit
+                      ? "bg-[#2b2620] text-[#f2ead7]"
+                      : "bg-transparent text-[#2b2620] hover:bg-[#2b2620]/10"
+                  }`}
+                  onClick={() => updateField("unit", unit)}
+                >
+                  {unit === "mm" ? "MM" : "INCH"}
+                </button>
+              ))}
+            </div>
+            <Stamp label="Checked · 06/12/26" tone="red" tilt={-1.5} />
+          </div>
+        </header>
+
+        {/* ---- Job card row ---- */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b-[1.5px] border-[#b4a585] px-1 py-3">
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#6e6354]">
+            Job Card:
           </span>
           <input
-            className="h-9 w-44 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
+            className="w-[260px] max-w-full rounded-none border-0 border-b-[1.5px] border-[#8d7f63] bg-transparent px-1 py-1 text-sm text-[#2b2620] outline-none transition focus:border-[#1f6e54]"
             type="text"
-            placeholder='Name, e.g. "Fretboard 1"'
+            placeholder="name this setup, e.g. JAZZMASTER 22F"
             value={profileName}
             onChange={(event) => setProfileName(event.target.value)}
             onKeyDown={(event) => {
@@ -2456,40 +2645,36 @@ export default function Home() {
           />
           <button
             type="button"
-            className="h-9 shrink-0 rounded-md bg-[#19695f] px-3 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
+            className="shrink-0 -rotate-1 rounded-none border-2 border-[#1f6e54] bg-transparent px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#1f6e54] transition hover:bg-[#1f6e54]/10 disabled:cursor-not-allowed disabled:border-[#b4a585] disabled:text-[#b4a585]"
             disabled={!profileName.trim()}
             onClick={handleSaveProfile}
           >
             {profiles.some((profile) => profile.name === profileName.trim())
-              ? "Update"
-              : "Save"}
+              ? "Update ➜ File"
+              : "Save ➜ File"}
           </button>
-          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
             {profiles.length === 0 ? (
-              <span className="whitespace-nowrap text-xs text-[#77838a]">
-                No saved profiles yet — name and save your current setup.
+              <span className="whitespace-nowrap text-xs italic text-[#6e6354]">
+                no saved profiles yet — name and file your current setup
               </span>
             ) : (
               profiles.map((profile) => (
                 <span
                   key={profile.name}
-                  className="flex shrink-0 items-stretch overflow-hidden rounded-md border border-[#c7d1d8] bg-[#f7fafb]"
+                  className="flex shrink-0 items-stretch overflow-hidden rounded-none border border-[#8d7f63] bg-[#faf4e4]"
                 >
                   <button
                     type="button"
-                    className="max-w-48 truncate px-3 py-1.5 text-sm font-semibold text-[#26302f] transition hover:bg-[#e8eef2]"
-                    title={`Load "${profile.name}" (${
-                      profile.form.unit
-                    }, ${numberFormatter.format(
-                      Number(profile.form.scaleLength) || 0,
-                    )} scale)`}
+                    className="max-w-48 truncate px-2.5 py-1 text-sm font-bold text-[#2b2620] transition hover:bg-[#e7ddc6]"
+                    title={`Load "${profile.name}"`}
                     onClick={() => handleLoadProfile(profile)}
                   >
                     {profile.name}
                   </button>
                   <button
                     type="button"
-                    className="border-l border-[#d6dde2] px-2 text-sm font-semibold text-[#77838a] transition hover:bg-[#fbeae6] hover:text-[#a94432]"
+                    className="border-l border-[#b4a585] px-2 text-sm font-bold text-[#6e6354] transition hover:bg-[#f5ddd4] hover:text-[#9b3b2a]"
                     aria-label={`Delete profile ${profile.name}`}
                     title={`Delete "${profile.name}"`}
                     onClick={() => handleDeleteProfile(profile.name)}
@@ -2500,981 +2685,768 @@ export default function Home() {
               ))
             )}
           </div>
+          <span className="ml-auto hidden shrink-0 whitespace-nowrap text-xs font-bold text-[#bf3b1f] lg:inline">
+            ☞ hover any field to see it on the drawings
+          </span>
         </div>
-      </nav>
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
-        <section className="grid gap-5 lg:grid-cols-[minmax(330px,420px)_1fr]">
-          <div className="flex flex-col gap-4">
-            <section className="rounded-lg border border-[#c7d1d8] bg-white p-4 shadow-sm">
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[#8a4f1f]">
-                  CNC fretboard generator
-                </p>
-                <h1 className="text-3xl font-semibold leading-tight text-[#1f2523]">
-                  Fretboard radius and slot G-code
-                </h1>
-              </div>
 
-              <div className="mt-4 grid grid-cols-2 rounded-md border border-[#c7d1d8] bg-[#e8eef2] p-1">
-                {(["mm", "in"] as const).map((unit) => (
-                  <button
-                    key={unit}
-                    type="button"
-                    className={`h-10 rounded-[4px] text-sm font-semibold transition ${
-                      form.unit === unit
-                        ? "bg-[#19695f] text-white shadow-sm"
-                        : "text-[#26302f] hover:bg-white/70"
-                    }`}
-                    onClick={() => updateField("unit", unit)}
-                  >
-                    {unit === "mm" ? "Millimeters" : "Inches"}
-                  </button>
+        {/* ---- Main two-column worksheet ---- */}
+        <div className="grid items-start gap-5 pt-5 lg:grid-cols-[354px_1fr]">
+          {/* LEFT: input panels */}
+          <div className="grid gap-4">
+            <Panel number="1" title="Board Setup" stamp="SHARED" stampTone="green">
+              <div className="grid gap-3.5">
+                {sharedFieldGroups.map((group) => (
+                  <div key={group.title} className="grid gap-2.5">
+                    <SubLabel>{group.title}</SubLabel>
+                    <div
+                      className={`grid gap-x-3.5 gap-y-2.5 ${
+                        group.title === "Material"
+                          ? "grid-cols-3"
+                          : "grid-cols-2"
+                      }`}
+                    >
+                      {group.fields.map((field) => (
+                        <WorksheetField
+                          key={field.key}
+                          fieldKey={field.key}
+                          label={field.label}
+                          description={fieldDescriptions[field.key]}
+                          min={field.min}
+                          step={field.step}
+                          value={form[field.key] as string | number}
+                          onChange={updateField}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
-            </section>
+            </Panel>
 
-            <div className="grid gap-4">
-              <CollapsiblePanel
-                title="Shared Board Setup"
-                stepLabel="Shared"
-                summary="Geometry, fret spacing, top radius, and material data used across operations."
-                accent="teal"
-              >
-                <div className="grid gap-3">
-                  {sharedFieldGroups.map((group) => (
-                    <section
-                      key={group.title}
-                      className="overflow-hidden rounded-md border border-[#d6dde2] bg-[#f7fafb]"
-                    >
-                      <div className="border-b border-[#d6dde2] bg-white px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-[4px] bg-[#e8eef2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#53616a]">
-                            {group.stepLabel}
-                          </span>
-                          <h3 className="text-sm font-semibold text-[#1f2523]">
-                            {group.title}
-                          </h3>
-                        </div>
-                        <p className="mt-1 text-xs leading-snug text-[#53616a]">
-                          {group.summary}
-                        </p>
-                      </div>
-                      <div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                        {group.fields.map((field) => (
-                          <label
-                            key={field.key}
-                            className="grid gap-1 text-sm font-medium text-[#26302f]"
-                            {...fieldHoverProps(field.key)}
-                          >
-                            <FieldLabel
-                              label={field.label}
-                              description={fieldDescriptions[field.key]}
-                            />
-                            <input
-                              className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                              type="number"
-                              min={field.min}
-                              step={field.step}
-                              value={form[field.key] as string | number}
-                              onChange={(event) =>
-                                updateField(field.key, event.target.value)
-                              }
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </CollapsiblePanel>
+            <Panel number="2" title="Fret Slots" stamp="OP 1">
+              <div className="grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+                {slotFields.map((field) => (
+                  <WorksheetField
+                    key={field.key}
+                    fieldKey={field.key}
+                    label={field.label}
+                    description={fieldDescriptions[field.key]}
+                    min={field.min}
+                    step={field.step}
+                    value={form[field.key] as string | number}
+                    onChange={updateField}
+                  />
+                ))}
+              </div>
+            </Panel>
 
-              <CollapsiblePanel
-                title="Fret Slots"
-                stepLabel="Slots"
-                summary="Standalone fret-slot settings for Fret Slots or Frets + Markers exports."
-                accent="teal"
-              >
-                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
-                  Uses the shared fret positions, board width, and fretboard top radius. These
-                  slot inset, cutter, depth, and feed settings are only required for slot exports.
-                  Slot bottoms follow the selected top radius.
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  {slotFields.map((field) => (
-                    <label
-                      key={field.key}
-                      className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      {...fieldHoverProps(field.key)}
-                    >
-                      <FieldLabel
-                              label={field.label}
-                              description={fieldDescriptions[field.key]}
-                            />
-                      <input
-                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                        type="number"
-                        min={field.min}
-                        step={field.step}
-                        value={form[field.key] as string | number}
-                        onChange={(event) => updateField(field.key, event.target.value)}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </CollapsiblePanel>
-
-              <CollapsiblePanel
-                title="Fretboard Cutout"
-                stepLabel="Cutout"
-                summary="Standalone outline profiling settings; does not use radius or slot cutter settings."
-                accent="blue"
-              >
-                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
-                  Uses the shared board shape above. These cutter, depth, tab, and feed settings
-                  are only required for the cutout export.
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  {[
-                    ["cutoutBitDiameter", "Cutout bit diameter"],
-                    ["cutoutDepth", "Cutout depth"],
+            <Panel number="3" title="Cutout" stamp="OP 2">
+              <div className="grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+                {(
+                  [
+                    ["cutoutBitDiameter", "Bit dia."],
+                    ["cutoutDepth", "Cut depth"],
                     ["cutoutDepthPerPass", "Depth per pass"],
-                    ["cutoutFeedRate", "Feed rate"],
-                    ["cutoutPlungeRate", "Plunge rate"],
+                    ["cutoutFeedRate", "Feed · mm/min"],
+                    ["cutoutPlungeRate", "Plunge · mm/min"],
                     ["cutoutSpindleRpm", "Spindle RPM"],
                     ["cutoutAllowance", "Outside allowance"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      {...fieldHoverProps(key)}
-                    >
-                      <FieldLabel label={label} description={fieldDescriptions[key]} />
-                      <input
-                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                        type="number"
-                        min={key === "cutoutAllowance" ? "0" : "0.001"}
-                        step={key === "cutoutSpindleRpm" ? "1" : "0.001"}
-                        value={form[key as keyof FormState] as string | number}
-                        onChange={(event) =>
-                          updateField(key as keyof FormState, event.target.value)
-                        }
-                      />
-                    </label>
-                  ))}
-
-                  <label
-                    className="flex items-center gap-2 text-sm font-semibold text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2"
-                    {...fieldHoverProps("cutoutTabsEnabled")}
-                  >
-                    <input
-                      className="h-4 w-4 accent-[#19695f]"
-                      type="checkbox"
-                      checked={form.cutoutTabsEnabled}
-                      onChange={(event) =>
-                        updateBooleanField(
-                          "cutoutTabsEnabled",
-                          event.target.checked,
-                        )
-                      }
-                    />
-                    <FieldLabel
-                      label="Leave holding tabs"
-                      description={fieldDescriptions.cutoutTabsEnabled}
-                    />
-                  </label>
-
-                  {[
+                  ] as const
+                ).map(([key, label]) => (
+                  <WorksheetField
+                    key={key}
+                    fieldKey={key}
+                    label={label}
+                    description={fieldDescriptions[key]}
+                    min={key === "cutoutAllowance" ? "0" : "0.001"}
+                    step={key === "cutoutSpindleRpm" ? "1" : "0.001"}
+                    value={form[key] as string | number}
+                    onChange={updateField}
+                  />
+                ))}
+                <label
+                  data-h="cutoutTabsEnabled"
+                  className="col-span-2 flex items-center gap-2 rounded-none p-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#2b2620] [margin:-4px]"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-[#1f6e54]"
+                    checked={form.cutoutTabsEnabled}
+                    onChange={(event) =>
+                      updateBooleanField("cutoutTabsEnabled", event.target.checked)
+                    }
+                  />
+                  Leave holding tabs
+                </label>
+                {(
+                  [
                     ["tabCount", "Tab count"],
                     ["tabWidth", "Tab width"],
                     ["tabHeight", "Tab height"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      {...fieldHoverProps(key)}
-                    >
-                      <FieldLabel label={label} description={fieldDescriptions[key]} />
-                      <input
-                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20 disabled:bg-[#eef2f4] disabled:text-[#77838a]"
-                        type="number"
-                        min="0"
-                        step={key === "tabCount" ? "1" : "0.001"}
-                        disabled={!form.cutoutTabsEnabled}
-                        value={form[key as keyof FormState] as string | number}
-                        onChange={(event) =>
-                          updateField(key as keyof FormState, event.target.value)
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </CollapsiblePanel>
+                  ] as const
+                ).map(([key, label]) => (
+                  <WorksheetField
+                    key={key}
+                    fieldKey={key}
+                    label={label}
+                    description={fieldDescriptions[key]}
+                    min="0"
+                    step={key === "tabCount" ? "1" : "0.001"}
+                    disabled={!form.cutoutTabsEnabled}
+                    value={form[key] as string | number}
+                    onChange={updateField}
+                  />
+                ))}
+              </div>
+            </Panel>
 
-              <CollapsiblePanel
-                title="Fretboard Radius"
-                stepLabel="Surface"
-                summary="Standalone top-radius surfacing settings; does not use cutout or slot cutter settings."
-                accent="teal"
-                defaultOpen={false}
-              >
-                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
-                  Uses the shared board width, end margins, material, and fretboard top radius.
-                  These radiusing cutter and feed settings are only required for the Radius Top export.
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  {[
-                    ["radiusBitDiameter", "Radiusing bit diameter"],
-                    ["radiusStepOver", "Y step-over"],
-                    ["radiusDepthPerPass", "Max depth per pass"],
-                    ["radiusFeedRate", "Feed rate"],
-                    ["radiusPlungeRate", "Plunge rate"],
+            <Panel number="4" title="Surface Radius" stamp="OP 3" defaultOpen={false}>
+              <div className="grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+                {(
+                  [
+                    ["radiusBitDiameter", "Ball-nose dia."],
+                    ["radiusStepOver", "Stepover"],
+                    ["radiusDepthPerPass", "Depth per pass"],
+                    ["radiusFeedRate", "Feed · mm/min"],
+                    ["radiusPlungeRate", "Plunge · mm/min"],
                     ["radiusSpindleRpm", "Spindle RPM"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      {...fieldHoverProps(key)}
-                    >
-                      <FieldLabel label={label} description={fieldDescriptions[key]} />
-                      <input
-                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                        type="number"
-                        min="0.001"
-                        step={key === "radiusSpindleRpm" ? "1" : "0.001"}
-                        value={form[key as keyof FormState] as string | number}
-                        onChange={(event) =>
-                          updateField(key as keyof FormState, event.target.value)
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </CollapsiblePanel>
+                  ] as const
+                ).map(([key, label]) => (
+                  <WorksheetField
+                    key={key}
+                    fieldKey={key}
+                    label={label}
+                    description={fieldDescriptions[key]}
+                    min="0.001"
+                    step={key === "radiusSpindleRpm" ? "1" : "0.001"}
+                    value={form[key] as string | number}
+                    onChange={updateField}
+                  />
+                ))}
+              </div>
+            </Panel>
 
-              <CollapsiblePanel
-                title="Fretboard Markers"
-                stepLabel="Markers"
-                summary="Standalone marker-pocket settings; can be exported without slot or cutout settings."
-                accent="brown"
-                defaultOpen={false}
-              >
-                <div className="mb-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] px-3 py-2 text-sm leading-snug text-[#53616a]">
-                  Uses the shared fret positions and fretboard radius. These marker settings are
-                  only required for marker exports or when including markers with fret slots.
-                </div>
+            <Panel number="5" title="Markers" stamp="OP 4" defaultOpen={false}>
+              <div className="grid grid-cols-2 gap-x-3.5 gap-y-2.5">
                 <label
-                  className="flex items-center gap-2 text-sm font-semibold text-[#26302f]"
-                  {...fieldHoverProps("markersEnabled")}
+                  data-h="markersEnabled"
+                  className="col-span-2 flex items-center gap-2 rounded-none p-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#2b2620] [margin:-4px]"
                 >
                   <input
-                    className="h-4 w-4 accent-[#19695f]"
                     type="checkbox"
+                    className="h-3.5 w-3.5 accent-[#1f6e54]"
                     checked={form.markersEnabled}
                     onChange={(event) =>
                       updateBooleanField("markersEnabled", event.target.checked)
                     }
                   />
-                  <FieldLabel
-                    label="Include marker pockets"
-                    description={fieldDescriptions.markersEnabled}
-                  />
+                  Include marker pockets
                 </label>
-
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  <label
-                    className="grid gap-1 text-sm font-medium text-[#26302f]"
-                    {...fieldHoverProps("markerShape")}
+                <label
+                  data-h="markerShape"
+                  className="grid gap-0.5 rounded-none p-1 [margin:-4px]"
+                >
+                  <FieldLabel
+                    label="Marker shape"
+                    description={fieldDescriptions.markerShape}
+                  />
+                  <select
+                    className="h-8 rounded-none border-0 border-b-[1.5px] border-[#8d7f63] bg-transparent text-[15px] text-[#2b2620] outline-none transition focus:border-[#1f6e54]"
+                    value={form.markerShape}
+                    onChange={(event) => updateField("markerShape", event.target.value)}
                   >
-                    <FieldLabel
-                      label="Marker shape"
-                      description={fieldDescriptions.markerShape}
-                    />
-                    <select
-                      className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                      value={form.markerShape}
-                      onChange={(event) =>
-                        updateField("markerShape", event.target.value)
-                      }
-                    >
-                      <option value="dot">Dot</option>
-                      <option value="rectangle">Rectangle</option>
-                      <option value="diamond">Diamond</option>
-                      <option value="trapezoid">Trapezoid</option>
-                    </select>
-                  </label>
-
-                  <label
-                    className="grid gap-1 text-sm font-medium text-[#26302f] sm:col-span-2 lg:col-span-1 xl:col-span-2"
-                    {...fieldHoverProps("markerFrets")}
-                  >
-                    <FieldLabel
-                      label="Marker map"
-                      description={fieldDescriptions.markerFrets}
-                    />
-                    <input
-                      className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                      type="text"
-                      value={form.markerFrets}
-                      onChange={(event) =>
-                        updateField("markerFrets", event.target.value)
-                      }
-                    />
-                  </label>
-
-                  <div
-                    className="grid gap-2 sm:col-span-2 lg:col-span-1 xl:col-span-2"
-                    {...fieldHoverProps("fretSpaceMarkers")}
-                  >
-                    <div className="text-sm font-semibold text-[#26302f]">
-                      <FieldLabel
-                        label="Fret space markers"
-                        description={fieldDescriptions.fretSpaceMarkers}
-                      />
-                    </div>
-                    <div className="grid grid-cols-[repeat(auto-fit,minmax(92px,1fr))] gap-2">
-                      {Array.from({ length: Math.max(form.fretCount, 0) }, (_, index) => {
+                    <option value="dot">Dot</option>
+                    <option value="rectangle">Rectangle</option>
+                    <option value="diamond">Diamond</option>
+                    <option value="trapezoid">Trapezoid</option>
+                  </select>
+                </label>
+                <WorksheetField
+                  fieldKey="markerFrets"
+                  label="Marked frets (double at 12)"
+                  description={fieldDescriptions.markerFrets}
+                  type="text"
+                  value={form.markerFrets}
+                  onChange={updateField}
+                  wide
+                />
+                <div
+                  data-h="fretSpaceMarkers"
+                  className="col-span-2 grid gap-1.5 rounded-none p-1 [margin:-4px]"
+                >
+                  <FieldLabel
+                    label="Fret space markers"
+                    description={fieldDescriptions.fretSpaceMarkers}
+                  />
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(88px,1fr))] gap-1.5">
+                    {Array.from(
+                      { length: Math.max(form.fretCount, 0) },
+                      (_, index) => {
                         const fretSpace = index + 1;
                         const selectedCount = markerCountByFret.get(fretSpace) ?? 0;
-
                         return (
                           <div
                             key={fretSpace}
-                            className="grid gap-1 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-2"
+                            className="grid gap-1 border border-[#b4a585] bg-[#f2ead7] p-1.5"
                           >
-                            <div className="text-xs font-semibold uppercase text-[#53616a]">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6e6354]">
                               Fret {fretSpace}
                             </div>
-                            <div className="grid grid-cols-3 rounded-[4px] border border-[#c7d1d8] bg-[#e8eef2] p-0.5">
+                            <div className="grid grid-cols-3 border border-[#8d7f63]">
                               {([0, 1, 2] as const).map((count) => (
                                 <button
                                   key={count}
                                   type="button"
                                   aria-pressed={selectedCount === count}
-                                  className={`h-8 rounded-[3px] text-xs font-semibold transition ${
+                                  className={`py-1 text-[11px] font-bold transition ${
                                     selectedCount === count
-                                      ? "bg-[#19695f] text-white shadow-sm"
-                                      : "text-[#26302f] hover:bg-white/80"
+                                      ? "bg-[#2b2620] text-[#f2ead7]"
+                                      : "bg-transparent text-[#2b2620] hover:bg-[#2b2620]/10"
                                   }`}
                                   onClick={() => updateMarkerCount(fretSpace, count)}
                                 >
-                                  {count === 0 ? "Off" : count}
+                                  {count === 0 ? "·" : count}
                                 </button>
                               ))}
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
+                      },
+                    )}
                   </div>
-
-                  {[
-                    ["markerWidth", "Marker width"],
+                </div>
+                {(
+                  [
+                    ["markerWidth", "Dot dia."],
                     ["markerLength", "Marker length"],
                     ["markerTopWidth", "Trapezoid top width"],
-                    ["markerDepth", "Marker depth"],
+                    ["markerDepth", "Pocket depth"],
                     ["markerDepthPerPass", "Depth per pass"],
-                    ["markerBitDiameter", "Marker bit diameter"],
-                    ["markerFeedRate", "Marker feed rate"],
-                    ["markerPlungeRate", "Marker plunge rate"],
-                    ["markerSpindleRpm", "Marker spindle RPM"],
+                    ["markerBitDiameter", "Marker bit dia."],
+                    ["markerFeedRate", "Feed · mm/min"],
+                    ["markerPlungeRate", "Plunge · mm/min"],
+                    ["markerSpindleRpm", "Spindle RPM"],
                     ["markerXOffset", "X offset"],
                     ["doubleMarkerSpacing", "Double dot spacing"],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="grid gap-1 text-sm font-medium text-[#26302f]"
-                      {...fieldHoverProps(key)}
-                    >
-                      <FieldLabel label={label} description={fieldDescriptions[key]} />
-                      <input
-                        className="h-10 rounded-md border border-[#c7d1d8] bg-white px-3 text-base text-[#1f2523] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                        type="number"
-                        step={key === "markerSpindleRpm" ? "1" : "0.001"}
-                        value={form[key as keyof FormState] as string | number}
-                        onChange={(event) =>
-                          updateField(key as keyof FormState, event.target.value)
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </CollapsiblePanel>
-            </div>
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-5 [&>*]:shrink-0 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
-            <CollapsiblePanel
-              title="Cutout And Slot Preview"
-              stepLabel="Preview"
-              summary="Visual check for material, board outline, cutter path, frets, and markers."
-              accent="slate"
-              actions={
-                <div className="text-sm font-semibold text-[#53616a]">
-                  Origin X0 Y0: lower-left front corner
-                </div>
-              }
-            >
-              <svg
-                className="h-auto w-full rounded-md border border-[#d6dde2] bg-[#f7fafb]"
-                viewBox={`0 0 ${preview.width} ${preview.height}`}
-                role="img"
-                aria-label="Preview of the centered material and fret slot toolpaths"
-              >
-                <rect
-                  x={svgNumber(preview.originX)}
-                  y={svgNumber(preview.originY)}
-                  width={svgNumber(preview.drawingWidth)}
-                  height={svgNumber(preview.drawingHeight)}
-                  fill={highlightTarget === "material" ? "#fdeede" : "#e9eef2"}
-                  stroke={
-                    highlightTarget === "material" ? highlightColor : "#60717b"
-                  }
-                  strokeWidth={highlightTarget === "material" ? "4" : "2"}
-                />
-                <polygon
-                  points={fretboardOutline.points
-                    .map(
-                      (point) =>
-                        `${svgNumber(
-                          preview.originX + point.x * preview.scaleX,
-                        )},${svgNumber(
-                          preview.originY +
-                            preview.drawingHeight -
-                            point.y * preview.scaleY,
-                        )}`,
-                    )
-                    .join(" ")}
-                  fill="#dcebe2"
-                  stroke={
-                    highlightTarget === "outline" ? highlightColor : "#19695f"
-                  }
-                  strokeWidth={highlightTarget === "outline" ? "4" : "2"}
-                />
-                <polygon
-                  points={fretboardOutline.cutterPath
-                    .map(
-                      (point) =>
-                        `${svgNumber(
-                          preview.originX + point.x * preview.scaleX,
-                        )},${svgNumber(
-                          preview.originY +
-                            preview.drawingHeight -
-                            point.y * preview.scaleY,
-                        )}`,
-                    )
-                    .join(" ")}
-                  fill="none"
-                  stroke={
-                    highlightTarget === "cutterPath" ? highlightColor : "#1f2523"
-                  }
-                  strokeDasharray="5 5"
-                  strokeWidth={highlightTarget === "cutterPath" ? "3" : "1.5"}
-                />
-                <line
-                  x1={svgNumber(preview.originX + preview.drawingWidth / 2)}
-                  y1={svgNumber(preview.originY)}
-                  x2={svgNumber(preview.originX + preview.drawingWidth / 2)}
-                  y2={svgNumber(preview.originY + preview.drawingHeight)}
-                  stroke="#8a4f1f"
-                  strokeDasharray="6 6"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1={svgNumber(preview.originX)}
-                  y1={
-                    svgNumber(
-                      preview.originY +
-                        preview.drawingHeight -
-                        layout.nutY * preview.scaleY,
-                    )
-                  }
-                  x2={svgNumber(preview.originX + preview.drawingWidth)}
-                  y2={
-                    svgNumber(
-                      preview.originY +
-                        preview.drawingHeight -
-                        layout.nutY * preview.scaleY,
-                    )
-                  }
-                  stroke={
-                    highlightTarget === "slots" ? highlightColor : "#19695f"
-                  }
-                  strokeWidth={highlightTarget === "slots" ? "3" : "2"}
-                />
-                {layout.slots.map((slot) => (
-                  <line
-                    key={slot.fret}
-                    x1={svgNumber(preview.originX + slot.startX * preview.scaleX)}
-                    y1={svgNumber(
-                      preview.originY +
-                        preview.drawingHeight -
-                        slot.y * preview.scaleY,
-                    )}
-                    x2={svgNumber(preview.originX + slot.endX * preview.scaleX)}
-                    y2={svgNumber(
-                      preview.originY +
-                        preview.drawingHeight -
-                        slot.y * preview.scaleY,
-                    )}
-                    stroke={
-                      highlightTarget === "slots" ? highlightColor : "#c2412e"
-                    }
-                    strokeWidth={highlightTarget === "slots" ? "3.5" : "2"}
-                    strokeLinecap="round"
+                  ] as const
+                ).map(([key, label]) => (
+                  <WorksheetField
+                    key={key}
+                    fieldKey={key}
+                    label={label}
+                    description={fieldDescriptions[key]}
+                    step={key === "markerSpindleRpm" ? "1" : "0.001"}
+                    value={form[key] as string | number}
+                    onChange={updateField}
                   />
                 ))}
-                {markers.map((marker) =>
-                  marker.shape === "dot" ? (
-                    <circle
-                      key={marker.id}
-                      cx={svgNumber(preview.originX + marker.centerX * preview.scaleX)}
-                      cy={svgNumber(
-                        preview.originY +
-                          preview.drawingHeight -
-                          marker.y * preview.scaleY,
-                      )}
-                      r={svgNumber(
-                        (Number(form.markerWidth) / 2) *
-                          Math.min(preview.scaleX, preview.scaleY),
-                      )}
-                      fill={
-                        highlightTarget === "markers" ? "#ffd34d" : "#f4d35e"
-                      }
-                      stroke={
-                        highlightTarget === "markers"
-                          ? highlightColor
-                          : "#8a4f1f"
-                      }
-                      strokeWidth={
-                        highlightTarget === "markers" ? "3" : "1.5"
-                      }
-                    />
-                  ) : (
-                    <polygon
-                      key={marker.id}
-                      points={markerPreviewPolygon(form, marker)
-                        .map(
-                          (point) =>
-                            `${svgNumber(
-                              preview.originX + point.x * preview.scaleX,
-                            )},${svgNumber(
-                              preview.originY +
-                                preview.drawingHeight -
-                                point.y * preview.scaleY,
-                            )}`,
-                        )
-                        .join(" ")}
-                      fill={
-                        highlightTarget === "markers" ? "#ffd34d" : "#f4d35e"
-                      }
-                      stroke={
-                        highlightTarget === "markers"
-                          ? highlightColor
-                          : "#8a4f1f"
-                      }
-                      strokeWidth={
-                        highlightTarget === "markers" ? "3" : "1.5"
-                      }
-                    />
-                  ),
-                )}
-                <circle
-                  cx={svgNumber(preview.originX)}
-                  cy={svgNumber(preview.originY + preview.drawingHeight)}
-                  r="5"
-                  fill="#19695f"
-                />
-                <text
-                  x={svgNumber(preview.originX + 10)}
-                  y={svgNumber(preview.originY + preview.drawingHeight - 10)}
-                  fill="#19695f"
-                  fontSize="14"
-                  fontWeight="700"
-                >
-                  X0 Y0
-                </text>
-              </svg>
-            </CollapsiblePanel>
+              </div>
+            </Panel>
+          </div>
 
-            <CollapsiblePanel
-              title="Radius Preview"
-              stepLabel="Surface"
-              summary="Cross-section of the generated fretboard top radius at the widest board width."
-              accent="teal"
+          {/* RIGHT: drawings, figures, files, schedule */}
+          <div className="grid min-w-0 gap-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto lg:pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-[#b4a585]">
+            <Panel
+              title="DWG 1 · Plan View"
+              note="stock, outline, cutter path, slots & markers — origin at lower-left of stock"
             >
-              <svg
-                className="h-auto w-full rounded-md border border-[#d6dde2] bg-[#f7fafb]"
-                viewBox={`0 0 ${radiusPreview.width} ${radiusPreview.height}`}
-                role="img"
-                aria-label="Cross-section preview of the fretboard radius"
-              >
-                <rect
-                  x={svgNumber(radiusPreview.leftX)}
-                  y={svgNumber(radiusPreview.topY)}
-                  width={svgNumber(radiusPreview.rightX - radiusPreview.leftX)}
-                  height={svgNumber(radiusPreview.bottomY - radiusPreview.topY)}
-                  fill="#e9eef2"
-                  stroke="#60717b"
-                  strokeWidth="1.5"
-                />
-                <polygon
-                  points={[
-                    ...radiusPreview.points.map(
-                      (point) => `${svgNumber(point.x)},${svgNumber(point.y)}`,
+              <div className="grid gap-2.5">
+                <svg
+                  viewBox="0 0 1000 268"
+                  className="block h-auto w-full"
+                  role="img"
+                  aria-label="Top view of stock, fretboard outline, cutter path, fret slots and markers"
+                >
+                  <rect
+                    className="gl"
+                    data-g="materialLength materialWidth materialThickness"
+                    x="50"
+                    y="62"
+                    width="900"
+                    height="126"
+                    fill="var(--pv-mat)"
+                    stroke="var(--pv-matline)"
+                    strokeWidth="1.5"
+                  />
+                  <polygon
+                    className="gl"
+                    data-g="nutStringSpread bridgeStringSpread fretboardOverhang nutEndMargin lastFretEndMargin"
+                    points={topGeom.boardPts}
+                    fill="var(--pv-board)"
+                    stroke="var(--pv-boardline)"
+                    strokeWidth="1.5"
+                  />
+                  <polygon
+                    className="gl"
+                    data-g="cutoutBitDiameter cutoutDepth cutoutDepthPerPass cutoutFeedRate cutoutPlungeRate cutoutSpindleRpm cutoutAllowance"
+                    points={topGeom.cutPts}
+                    fill="none"
+                    stroke="var(--pv-cut)"
+                    strokeWidth="1.6"
+                    strokeDasharray="7 5"
+                  />
+                  {topGeom.tabEls.map((t, i) => (
+                    <rect
+                      key={i}
+                      className="gl glf"
+                      data-g="cutoutTabsEnabled tabCount tabWidth tabHeight"
+                      x={svgNumber(t.x)}
+                      y={svgNumber(t.y)}
+                      width={svgNumber(t.w)}
+                      height={svgNumber(t.h)}
+                      fill="var(--pv-tab)"
+                    />
+                  ))}
+                  <line
+                    x1="58"
+                    y1="125"
+                    x2="944"
+                    y2="125"
+                    stroke="var(--pv-cl)"
+                    strokeWidth="1"
+                    strokeDasharray="8 6"
+                  />
+                  {topGeom.strings.map((s, i) => (
+                    <line
+                      key={i}
+                      className="gl"
+                      data-g="nutStringSpread bridgeStringSpread fretboardOverhang"
+                      x1={svgNumber(s.x1)}
+                      y1={svgNumber(s.y1)}
+                      x2={svgNumber(s.x2)}
+                      y2={svgNumber(s.y2)}
+                      stroke="var(--pv-string)"
+                      strokeWidth="1.2"
+                    />
+                  ))}
+                  <line
+                    className="gl"
+                    data-g="scaleLength nutEndMargin"
+                    x1={svgNumber(topGeom.nut.x)}
+                    y1={svgNumber(topGeom.nut.y1)}
+                    x2={svgNumber(topGeom.nut.x)}
+                    y2={svgNumber(topGeom.nut.y2)}
+                    stroke="var(--pv-nut)"
+                    strokeWidth="4.5"
+                  />
+                  {topGeom.slots.map((s) => (
+                    <line
+                      key={s.n}
+                      className="gl"
+                      data-g="fretCount scaleLength fretInset bitDiameter slotDepth feedRate depthPerPass spindleRpm"
+                      x1={svgNumber(s.x)}
+                      y1={svgNumber(s.y1)}
+                      x2={svgNumber(s.x)}
+                      y2={svgNumber(s.y2)}
+                      stroke="var(--pv-fret)"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                    />
+                  ))}
+                  {topGeom.slots.map((s) => (
+                    <text
+                      key={`n${s.n}`}
+                      x={svgNumber(s.x)}
+                      y={svgNumber(s.ly)}
+                      textAnchor="middle"
+                      fontSize="9.5"
+                      fontFamily="var(--pv-font)"
+                      fill="var(--pv-mut)"
+                    >
+                      {s.n}
+                    </text>
+                  ))}
+                  {topGeom.markerEls.map((m) =>
+                    m.isDot ? (
+                      <circle
+                        key={m.id}
+                        className="gl glf"
+                        data-g="markersEnabled markerShape markerFrets markerWidth markerLength markerTopWidth markerDepth markerDepthPerPass markerBitDiameter markerFeedRate markerPlungeRate markerSpindleRpm markerXOffset doubleMarkerSpacing"
+                        cx={svgNumber(m.cx)}
+                        cy={svgNumber(m.cy)}
+                        r={svgNumber(m.r)}
+                        fill="var(--pv-marker)"
+                        stroke="var(--pv-markerline)"
+                        strokeWidth="1.4"
+                      />
+                    ) : (
+                      <polygon
+                        key={m.id}
+                        className="gl glf"
+                        data-g="markersEnabled markerShape markerFrets markerWidth markerLength markerTopWidth markerDepth markerDepthPerPass markerBitDiameter markerFeedRate markerPlungeRate markerSpindleRpm markerXOffset doubleMarkerSpacing"
+                        points={m.poly}
+                        fill="var(--pv-marker)"
+                        stroke="var(--pv-markerline)"
+                        strokeWidth="1.4"
+                      />
                     ),
-                    `${svgNumber(radiusPreview.rightX)},${svgNumber(radiusPreview.bottomY)}`,
-                    `${svgNumber(radiusPreview.leftX)},${svgNumber(radiusPreview.bottomY)}`,
-                  ].join(" ")}
-                  fill="#dcebe2"
-                  stroke="none"
-                />
-                <line
-                  x1={svgNumber(radiusPreview.leftX)}
-                  y1={svgNumber(radiusPreview.topY)}
-                  x2={svgNumber(radiusPreview.rightX)}
-                  y2={svgNumber(radiusPreview.topY)}
-                  stroke="#60717b"
-                  strokeDasharray="6 6"
-                  strokeWidth="1.5"
-                />
-                <polyline
-                  points={radiusPreview.points
-                    .map((point) => `${svgNumber(point.x)},${svgNumber(point.y)}`)
-                    .join(" ")}
-                  fill="none"
-                  stroke={
-                    highlightTarget === "radius" ? highlightColor : "#19695f"
-                  }
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={highlightTarget === "radius" ? "6" : "4"}
-                />
-                <line
-                  x1={svgNumber(radiusPreview.centerX)}
-                  y1={svgNumber(radiusPreview.topY - 16)}
-                  x2={svgNumber(radiusPreview.centerX)}
-                  y2={svgNumber(radiusPreview.bottomY + 10)}
-                  stroke="#8a4f1f"
-                  strokeDasharray="5 5"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1={svgNumber(radiusPreview.rightX - 18)}
-                  y1={svgNumber(radiusPreview.topY)}
-                  x2={svgNumber(radiusPreview.rightX - 18)}
-                  y2={svgNumber(radiusPreview.bottomY)}
-                  stroke="#c2412e"
-                  strokeWidth="2"
-                />
-                <text
-                  x={svgNumber(radiusPreview.centerX + 10)}
-                  y={svgNumber(radiusPreview.topY - 8)}
-                  fill="#8a4f1f"
-                  fontSize="13"
-                  fontWeight="700"
-                >
-                  Z0 centerline
-                </text>
-                <text
-                  x={svgNumber(radiusPreview.rightX - 26)}
-                  y={svgNumber((radiusPreview.topY + radiusPreview.bottomY) / 2)}
-                  fill="#c2412e"
-                  fontSize="13"
-                  fontWeight="700"
-                  textAnchor="end"
-                >
-                  edge drop {numberFormatter.format(radiusPreview.edgeDrop)} {form.unit}
-                </text>
-                <text
-                  x={svgNumber(radiusPreview.leftX)}
-                  y={svgNumber(radiusPreview.height - 18)}
-                  fill="#26302f"
-                  fontSize="13"
-                  fontWeight="700"
-                >
-                  widest width {numberFormatter.format(radiusPreview.boardWidth)} {form.unit}
-                </text>
-                <text
-                  x={svgNumber(radiusPreview.rightX)}
-                  y={svgNumber(radiusPreview.height - 18)}
-                  fill="#53616a"
-                  fontSize="13"
-                  fontWeight="700"
-                  textAnchor="end"
-                >
-                  vertical scale {numberFormatter.format(radiusPreview.verticalExaggeration)}x
-                </text>
-              </svg>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel
-              title="Layout Summary"
-              stepLabel="Check"
-              summary="Key calculated values before exporting any machine files."
-              accent="teal"
-            >
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
-                  <div className="text-sm font-medium text-[#53616a]">
-                    Fret Formula
-                  </div>
-                  <div className="mt-2 font-mono text-sm text-[#1f2523]">
-                    y = L * (1 - 2^(-n/12))
-                  </div>
-                </div>
-                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
-                  <div className="text-sm font-medium text-[#53616a]">
-                    Widest Fretboard
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {numberFormatter.format(layout.maxFretboardWidth)} {form.unit}
-                  </div>
-                </div>
-                <div className="rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
-                  <div className="text-sm font-medium text-[#53616a]">
-                    Layout Offset
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {numberFormatter.format(layout.nutY)} {form.unit}
-                  </div>
-                </div>
-              </div>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel
-              title="Calculated Frets And Files"
-              stepLabel="Export"
-              summary="Review cutter-center fret coordinates and download each operation as its own file."
-              accent="blue"
-            >
-              <div className="mb-4 grid gap-3 rounded-md border border-[#d6dde2] bg-[#f7fafb] p-3">
-                <div className="grid gap-2 sm:grid-cols-[220px_1fr] sm:items-end">
-                  <label
-                    className="grid gap-1 text-sm font-semibold text-[#26302f]"
-                    htmlFor="gcode-file-extension"
+                  )}
+                  <text
+                    x={svgNumber(topGeom.nutX)}
+                    y="54"
+                    textAnchor="middle"
+                    fontSize="10.5"
+                    letterSpacing="1.5"
+                    fontFamily="var(--pv-font)"
+                    fill="var(--pv-mut)"
                   >
-                    <FieldLabel
-                      label="Downloaded file extension"
-                      description={fieldDescriptions.fileExtension}
-                    />
-                    <select
-                      id="gcode-file-extension"
-                      className="h-11 rounded-md border border-[#c7d1d8] bg-white px-3 text-sm font-semibold text-[#26302f] outline-none transition focus:border-[#19695f] focus:ring-2 focus:ring-[#19695f]/20"
-                      value={fileExtension}
-                      onChange={(event) =>
-                        setFileExtension(event.target.value as GCodeFileExtension)
-                      }
-                    >
-                      {gCodeFileExtensions.map((extension) => (
-                        <option key={extension} value={extension}>
-                          {extension}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="rounded-md border border-[#d6dde2] bg-white px-3 py-2 text-sm leading-snug text-[#53616a]">
-                    Export only the operation you plan to run. Each button downloads a separate
-                    G-code file using the shared board setup plus that operation&apos;s own settings.
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="rounded-[4px] bg-[#e8eef2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#39474e]">
-                        Surface
-                      </span>
-                      <span className={`text-xs font-bold ${canGenerateRadius ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
-                        {canGenerateRadius ? "Ready" : "Needs input"}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[#1f2523]">
-                        Radius the fretboard top
-                      </h3>
-                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
-                        Cuts the curved top surface to the selected fretboard radius.
-                      </p>
-                    </div>
-                    <div className="font-mono text-xs text-[#53616a]">
-                      {gCodeFilename(fileExtension, "fretboard-radius")}
-                    </div>
-                    <button
-                      type="button"
-                      className="h-11 rounded-md bg-[#60717b] px-3 text-sm font-semibold text-white transition hover:bg-[#39474e] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
-                      disabled={!canGenerateRadius}
-                      onClick={handleGenerateRadius}
-                    >
-                      Download Radius Top G-code
-                    </button>
-                  </section>
-
-                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="rounded-[4px] bg-[#e1ecf4] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#264c66]">
-                        Cutout
-                      </span>
-                      <span className={`text-xs font-bold ${canGenerateCutout ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
-                        {canGenerateCutout ? "Ready" : "Needs input"}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[#1f2523]">
-                        Cut the fretboard outline
-                      </h3>
-                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
-                        Profiles the tapered board shape with optional holding tabs.
-                      </p>
-                    </div>
-                    <div className="font-mono text-xs text-[#53616a]">
-                      {gCodeFilename(fileExtension, "fretboard-cutout")}
-                    </div>
-                    <button
-                      type="button"
-                      className="h-11 rounded-md bg-[#2f5d7c] px-3 text-sm font-semibold text-white transition hover:bg-[#264c66] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
-                      disabled={!canGenerateCutout}
-                      onClick={handleGenerateCutout}
-                    >
-                      Download Cutout G-code
-                    </button>
-                  </section>
-
-                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="rounded-[4px] bg-[#dcebe2] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#14544c]">
-                        Slots
-                      </span>
-                      <span className={`text-xs font-bold ${canGenerate ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
-                        {canGenerate ? "Ready" : "Needs input"}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[#1f2523]">
-                        {form.markersEnabled
-                          ? "Cut fret slots and marker pockets"
-                          : "Cut fret slots"}
-                      </h3>
-                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
-                        {form.markersEnabled
-                          ? "Cuts radiused fret slots, then marker pockets in the same file."
-                          : "Cuts fret slots with slot bottoms matching the selected radius."}
-                      </p>
-                    </div>
-                    <div className="font-mono text-xs text-[#53616a]">
-                      {gCodeFilename(fileExtension, "fret-slots")}
-                    </div>
-                    <button
-                      type="button"
-                      className="h-11 rounded-md bg-[#19695f] px-3 text-sm font-semibold text-white transition hover:bg-[#14544c] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
-                      disabled={!canGenerate}
-                      onClick={handleGenerate}
-                    >
-                      {form.markersEnabled
-                        ? "Download Slots + Markers G-code"
-                        : "Download Fret Slots G-code"}
-                    </button>
-                  </section>
-
-                  <section className="grid gap-3 rounded-md border border-[#d6dde2] bg-white p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="rounded-[4px] bg-[#f4e6d8] px-2 py-0.5 text-xs font-bold uppercase tracking-[0.1em] text-[#724018]">
-                        Markers
-                      </span>
-                      <span className={`text-xs font-bold ${canGenerateMarkers ? "text-[#14544c]" : "text-[#7d2d20]"}`}>
-                        {canGenerateMarkers ? "Ready" : "Needs input"}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[#1f2523]">
-                        Cut marker pockets only
-                      </h3>
-                      <p className="mt-1 text-sm leading-snug text-[#53616a]">
-                        Cuts only the selected dot or inlay pockets, with no fret-slot moves.
-                      </p>
-                    </div>
-                    <div className="font-mono text-xs text-[#53616a]">
-                      {gCodeFilename(fileExtension, "fretboard-markers")}
-                    </div>
-                    <button
-                      type="button"
-                      className="h-11 rounded-md bg-[#8a4f1f] px-3 text-sm font-semibold text-white transition hover:bg-[#724018] disabled:cursor-not-allowed disabled:bg-[#9ca49b]"
-                      disabled={!canGenerateMarkers}
-                      onClick={handleGenerateMarkers}
-                    >
-                      Download Marker Pockets G-code
-                    </button>
-                  </section>
+                    NUT
+                  </text>
+                  <text
+                    x={svgNumber(topGeom.endX)}
+                    y="54"
+                    textAnchor="end"
+                    fontSize="10.5"
+                    letterSpacing="1.5"
+                    fontFamily="var(--pv-font)"
+                    fill="var(--pv-mut)"
+                  >
+                    HEEL
+                  </text>
+                  <g>
+                    <circle cx="50" cy="188" r="5" fill="var(--pv-origin)" />
+                    <line x1="36" y1="188" x2="64" y2="188" stroke="var(--pv-origin)" strokeWidth="1.2" />
+                    <line x1="50" y1="174" x2="50" y2="202" stroke="var(--pv-origin)" strokeWidth="1.2" />
+                    <text x="60" y="206" fontSize="12" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-origin)">
+                      X0 Y0
+                    </text>
+                  </g>
+                  <g className="co" data-g="materialLength" stroke="var(--pv-hl)">
+                    <line x1="50" y1="216" x2="950" y2="216" strokeWidth="1.3" />
+                    <line x1="50" y1="210" x2="50" y2="222" strokeWidth="1.3" />
+                    <line x1="950" y1="210" x2="950" y2="222" strokeWidth="1.3" />
+                    <text x="500" y="234" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.matLen}
+                    </text>
+                  </g>
+                  <g className="co" data-g="materialWidth" stroke="var(--pv-hl)">
+                    <line x1="968" y1="62" x2="968" y2="188" strokeWidth="1.3" />
+                    <line x1="962" y1="62" x2="974" y2="62" strokeWidth="1.3" />
+                    <line x1="962" y1="188" x2="974" y2="188" strokeWidth="1.3" />
+                    <text x="984" y="129" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" transform="rotate(-90 984 129)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.width}
+                    </text>
+                  </g>
+                  <g className="co" data-g="scaleLength fretCount" stroke="var(--pv-hl)">
+                    <line x1={svgNumber(topGeom.nutX)} y1="248" x2={svgNumber(topGeom.f12X)} y2="248" strokeWidth="1.3" />
+                    <line x1={svgNumber(topGeom.nutX)} y1="242" x2={svgNumber(topGeom.nutX)} y2="254" strokeWidth="1.3" />
+                    <line x1={svgNumber(topGeom.f12X)} y1="242" x2={svgNumber(topGeom.f12X)} y2="254" strokeWidth="1.3" />
+                    <text x={svgNumber((topGeom.nutX + topGeom.f12X) / 2)} y="262" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.scale}
+                    </text>
+                  </g>
+                  <g className="co" data-g="nutEndMargin" stroke="var(--pv-hl)">
+                    <line x1={svgNumber(topGeom.startX)} y1="84" x2={svgNumber(topGeom.startX)} y2="48" strokeWidth="1.1" />
+                    <line x1={svgNumber(topGeom.nutX)} y1="84" x2={svgNumber(topGeom.nutX)} y2="48" strokeWidth="1.1" />
+                    <line x1={svgNumber(topGeom.startX)} y1="50" x2={svgNumber(topGeom.nutX)} y2="50" strokeWidth="1.3" />
+                    <text x={svgNumber(topGeom.nutX + 8)} y="42" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.nutMargin}
+                    </text>
+                  </g>
+                  <g className="co" data-g="lastFretEndMargin" stroke="var(--pv-hl)">
+                    <line x1={svgNumber(topGeom.lastFretX)} y1="72" x2={svgNumber(topGeom.lastFretX)} y2="48" strokeWidth="1.1" />
+                    <line x1={svgNumber(topGeom.endX)} y1="72" x2={svgNumber(topGeom.endX)} y2="48" strokeWidth="1.1" />
+                    <line x1={svgNumber(topGeom.lastFretX)} y1="50" x2={svgNumber(topGeom.endX)} y2="50" strokeWidth="1.3" />
+                    <text x={svgNumber(topGeom.endX)} y="42" textAnchor="end" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.endMargin}
+                    </text>
+                  </g>
+                  <g className="co" data-g="nutStringSpread" stroke="var(--pv-hl)">
+                    <line x1={svgNumber(topGeom.nutX + 15)} y1={svgNumber(topGeom.nutSpreadTopY)} x2={svgNumber(topGeom.nutX + 15)} y2={svgNumber(topGeom.nutSpreadBotY)} strokeWidth="1.3" />
+                    <line x1={svgNumber(topGeom.nutX + 9)} y1={svgNumber(topGeom.nutSpreadTopY)} x2={svgNumber(topGeom.nutX + 21)} y2={svgNumber(topGeom.nutSpreadTopY)} strokeWidth="1.3" />
+                    <line x1={svgNumber(topGeom.nutX + 9)} y1={svgNumber(topGeom.nutSpreadBotY)} x2={svgNumber(topGeom.nutX + 21)} y2={svgNumber(topGeom.nutSpreadBotY)} strokeWidth="1.3" />
+                    <text x={svgNumber(topGeom.nutX + 26)} y="129" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.spreadNut}
+                    </text>
+                  </g>
+                  <g className="co" data-g="bridgeStringSpread" stroke="var(--pv-hl)">
+                    <line x1="908" y1={svgNumber(topGeom.endSpreadTopY)} x2="908" y2={svgNumber(topGeom.endSpreadBotY)} strokeWidth="1.3" />
+                    <text x="900" y="76" textAnchor="end" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.spreadBridge}
+                    </text>
+                  </g>
+                  <g className="co" data-g="fretboardOverhang" stroke="var(--pv-hl)">
+                    <text x="120" y="58" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.overhang}
+                    </text>
+                  </g>
+                  <g className="co" data-g="fretInset" stroke="var(--pv-hl)">
+                    <text x="300" y="60" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.inset}
+                    </text>
+                  </g>
+                  <g className="co" data-g="bitDiameter slotDepth feedRate depthPerPass spindleRpm fretInset" stroke="var(--pv-hl)">
+                    <text x="180" y="214" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.slots}
+                    </text>
+                  </g>
+                  <g className="co" data-g="markersEnabled markerWidth markerDepth markerFeedRate markerSpindleRpm markerFrets markerShape markerBitDiameter markerLength markerTopWidth markerDepthPerPass markerPlungeRate markerXOffset doubleMarkerSpacing" stroke="var(--pv-hl)">
+                    <text x="640" y="214" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.markers}
+                    </text>
+                  </g>
+                  <g className="co" data-g="cutoutTabsEnabled tabCount tabWidth tabHeight" stroke="var(--pv-hl)">
+                    <text x="490" y="42" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">
+                      {topGeom.txt.tabs}
+                    </text>
+                  </g>
+                </svg>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-[#6e6354]">
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-3.5 border-[1.5px] border-[var(--pv-matline)] bg-[var(--pv-mat)]" />stock blank</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-3.5 border-[1.5px] border-[var(--pv-boardline)] bg-[var(--pv-board)]" />fretboard</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-0 w-4 border-t-2 border-dashed border-[var(--pv-cut)]" />cutter path + tabs</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-0 w-4 border-t-[2.5px] border-[var(--pv-fret)]" />fret slot</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full border-[1.5px] border-[var(--pv-markerline)] bg-[var(--pv-marker)]" />marker pocket</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--pv-origin)]" />machine origin X0 Y0</span>
                 </div>
               </div>
+            </Panel>
 
-              <div className="mb-4 grid gap-2 md:grid-cols-2">
-                {validationGroups.map(({ label, validation }) => {
-                  const isReady = validation.errors.length === 0;
+            <Panel
+              title="DWG 2 · Section A–A"
+              note="top radius across the widest point of the board"
+            >
+              <div className="grid gap-2">
+                <svg
+                  viewBox="0 0 1000 226"
+                  className="block h-auto w-full"
+                  role="img"
+                  aria-label="Cross-section of the fretboard blank at its widest point, showing the top radius"
+                >
+                  <polygon className="gl" data-g="materialThickness" points={sectionGeom.stockPts} fill="var(--pv-board)" stroke="var(--pv-boardline)" strokeWidth="1.5" />
+                  <polygon className="gl" data-g="radiusBitDiameter radiusStepOver radiusDepthPerPass radiusFeedRate radiusSpindleRpm radiusPlungeRate" points={sectionGeom.wastePts} fill="var(--pv-waste)" stroke="none" />
+                  <line x1="80" y1="40" x2="920" y2="40" stroke="var(--pv-cl)" strokeWidth="1.2" strokeDasharray="7 5" />
+                  <text x="84" y="30" fontSize="11" fontFamily="var(--pv-font)" fill="var(--pv-mut)">stock top before surfacing</text>
+                  <polyline className="gl" data-g="fretboardRadius radiusBitDiameter radiusStepOver radiusDepthPerPass radiusFeedRate radiusSpindleRpm" points={sectionGeom.arcPts} fill="none" stroke="var(--pv-arc)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="500" y1="18" x2="500" y2="212" stroke="var(--pv-cl)" strokeWidth="1" strokeDasharray="5 5" />
+                  <text x="508" y="22" fontSize="11" fontFamily="var(--pv-font)" fill="var(--pv-mut)">Z0 at crown centerline</text>
+                  <line className="gl" data-g="slotDepth depthPerPass bitDiameter" x1="500" y1="41" x2="500" y2={svgNumber(sectionGeom.slotBottom)} stroke="var(--pv-fret)" strokeWidth="3.5" />
+                  <g className="co" data-g="fretboardRadius" stroke="var(--pv-hl)">
+                    <line x1="946" y1="40" x2="946" y2="63.5" strokeWidth="1.3" />
+                    <line x1="940" y1="40" x2="952" y2="40" strokeWidth="1.3" />
+                    <line x1="940" y1="63.5" x2="952" y2="63.5" strokeWidth="1.3" />
+                    <text x="938" y="84" textAnchor="end" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">{sectionGeom.txt.edgeDrop}</text>
+                    <line x1="660" y1="92" x2="610" y2="55" strokeWidth="1" />
+                    <text x="666" y="100" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">{sectionGeom.txt.radius}</text>
+                  </g>
+                  <g className="co" data-g="materialThickness" stroke="var(--pv-hl)">
+                    <line x1="52" y1="40" x2="52" y2="200" strokeWidth="1.3" />
+                    <line x1="46" y1="40" x2="58" y2="40" strokeWidth="1.3" />
+                    <line x1="46" y1="200" x2="58" y2="200" strokeWidth="1.3" />
+                    <text x="40" y="123" textAnchor="middle" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" transform="rotate(-90 40 123)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">{sectionGeom.txt.thickness}</text>
+                  </g>
+                  <g className="co" data-g="slotDepth depthPerPass" stroke="var(--pv-hl)">
+                    <line x1="504" y1="56" x2="540" y2="56" strokeWidth="1" />
+                    <text x="546" y="60" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">{sectionGeom.txt.slot}</text>
+                  </g>
+                  <g className="co" data-g="radiusBitDiameter radiusStepOver radiusDepthPerPass radiusFeedRate radiusSpindleRpm" stroke="var(--pv-hl)">
+                    <line x1="250" y1="86" x2="220" y2="52" strokeWidth="1" />
+                    <text x="256" y="94" fontSize="13" fontWeight="700" fontFamily="var(--pv-font)" fill="var(--pv-hl)" stroke="var(--pv-halo)" strokeWidth="3.5" paintOrder="stroke">{sectionGeom.txt.surf}</text>
+                  </g>
+                </svg>
+                <div className="text-[11px] text-[#6e6354]">{sectionGeom.txt.caption}</div>
+              </div>
+            </Panel>
 
-                  return (
+            {/* figures */}
+            <div className="grid gap-3.5 sm:grid-cols-3">
+              <div className="border-2 border-[#2b2620] bg-[#faf4e4] px-3.5 py-2.5">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#6e6354]">
+                  Fret Formula
+                </div>
+                <div className="mt-1.5 text-[15px] font-bold">y = L·(1−2^(−n/12))</div>
+              </div>
+              <div className="border-2 border-[#2b2620] bg-[#faf4e4] px-3.5 py-2.5">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#6e6354]">
+                  Widest Fretboard
+                </div>
+                <div className="mt-1 font-[family-name:var(--font-display)] text-[22px] font-semibold">
+                  {numberFormatter.format(layout.maxFretboardWidth)}{" "}
+                  <span className="text-[10px] font-bold uppercase">{form.unit}</span>
+                </div>
+              </div>
+              <div className="border-2 border-[#2b2620] bg-[#faf4e4] px-3.5 py-2.5">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#6e6354]">
+                  Layout Offset
+                </div>
+                <div className="mt-1 font-[family-name:var(--font-display)] text-[22px] font-semibold">
+                  {numberFormatter.format(layout.nutY)}{" "}
+                  <span className="text-[10px] font-bold uppercase">{form.unit}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* machine files */}
+            <Panel
+              title="Machine Files"
+              note="export only the operation you plan to run"
+              actions={
+                <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[#6e6354]">
+                  Ext.
+                  <select
+                    className="rounded-none border-[1.5px] border-[#8d7f63] bg-transparent px-1.5 py-1 text-[13px] font-bold text-[#2b2620] outline-none"
+                    value={fileExtension}
+                    onChange={(event) =>
+                      setFileExtension(event.target.value as GCodeFileExtension)
+                    }
+                  >
+                    {gCodeFileExtensions.map((extension) => (
+                      <option key={extension} value={extension}>
+                        {extension}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              }
+            >
+              <div className="grid gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        op: "OP 3 · Surface",
+                        title: "Radius the fretboard top",
+                        file: gCodeFilename(fileExtension, "fretboard-radius"),
+                        ready: canGenerateRadius,
+                        onClick: handleGenerateRadius,
+                        cta: "↓ Download Radius G-code",
+                      },
+                      {
+                        op: "OP 2 · Cutout",
+                        title: "Cut the board outline + tabs",
+                        file: gCodeFilename(fileExtension, "fretboard-cutout"),
+                        ready: canGenerateCutout,
+                        onClick: handleGenerateCutout,
+                        cta: "↓ Download Cutout G-code",
+                      },
+                      {
+                        op: "OP 1 · Slots + Markers",
+                        title: form.markersEnabled
+                          ? "Slots, then marker pockets"
+                          : "Cut the fret slots",
+                        file: gCodeFilename(fileExtension, "fret-slots"),
+                        ready: canGenerate,
+                        onClick: handleGenerate,
+                        cta: form.markersEnabled
+                          ? "↓ Download Slots + Markers"
+                          : "↓ Download Slots G-code",
+                      },
+                      {
+                        op: "OP 4 · Markers Only",
+                        title: "Dot pockets, no slot moves",
+                        file: gCodeFilename(fileExtension, "fretboard-markers"),
+                        ready: canGenerateMarkers,
+                        onClick: handleGenerateMarkers,
+                        cta: "↓ Download Markers G-code",
+                      },
+                    ] as const
+                  ).map((card) => (
                     <div
-                      key={label}
-                      className={`rounded-md border px-3 py-2 text-sm ${
-                        isReady
-                          ? "border-[#b8d0c1] bg-[#f1f8f3] text-[#14544c]"
-                          : "border-[#d29b91] bg-[#fff1ef] text-[#7d2d20]"
-                      }`}
+                      key={card.op}
+                      className="grid gap-1.5 border-[1.5px] border-[#8d7f63] bg-[#f2ead7] px-3 py-2.5"
                     >
-                      <div className="font-semibold">
-                        {label}: {isReady ? "ready" : "needs input"}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e6354]">
+                          {card.op}
+                        </span>
+                        <Stamp
+                          label={card.ready ? "Ready" : "Check"}
+                          tone={card.ready ? "green" : "red"}
+                        />
                       </div>
-                      {validation.errors.length > 0 ? (
-                        <ul className="mt-1 list-disc pl-5">
-                          {validation.errors.map((error) => (
-                            <li key={error}>{error}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {validation.warnings.length > 0 ? (
-                        <ul className="mt-1 list-disc pl-5 text-[#72560e]">
-                          {validation.warnings.map((warning) => (
-                            <li key={warning}>{warning}</li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      <div className="text-[13px] font-bold text-[#2b2620]">
+                        {card.title}
+                      </div>
+                      <div className="text-xs text-[#6e6354]">{card.file}</div>
+                      <button
+                        type="button"
+                        className="mt-0.5 rounded-none bg-[#2b2620] px-3 py-2 text-[12px] font-bold uppercase tracking-[0.08em] text-[#f2ead7] transition hover:bg-[#43361f] disabled:cursor-not-allowed disabled:bg-[#b4a585]"
+                        disabled={!card.ready}
+                        onClick={card.onClick}
+                      >
+                        {card.cta}
+                      </button>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {validationGroups.map(({ label, validation }) => {
+                    const isReady = validation.errors.length === 0;
+                    return (
+                      <div
+                        key={label}
+                        className={`border-[1.5px] px-3 py-2 text-xs ${
+                          isReady
+                            ? "border-[#1f6e54] bg-[#e3ecdf] text-[#1f6e54]"
+                            : "border-[#9b3b2a] bg-[#f5ddd4] text-[#9b3b2a]"
+                        }`}
+                      >
+                        <div className="font-bold uppercase tracking-[0.06em]">
+                          {isReady ? "✓ " : "△ "}
+                          {label}: {isReady ? "ready" : "needs input"}
+                        </div>
+                        {validation.errors.length > 0 ? (
+                          <ul className="mt-1 list-disc pl-5">
+                            {validation.errors.map((error) => (
+                              <li key={error}>{error}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {validation.warnings.length > 0 ? (
+                          <ul className="mt-1 list-disc pl-5 text-[#9b3b2a]">
+                            {validation.warnings.map((warning) => (
+                              <li key={warning}>{warning}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
+            </Panel>
 
-              <div className="max-h-[420px] overflow-auto rounded-md border border-[#d6dde2]">
-                <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-                  <thead className="sticky top-0 bg-[#e8eef2] text-[#26302f]">
+            {/* fret schedule */}
+            <Panel title="Fret Schedule" note="cutter-center coordinates · mm">
+              <div className="max-h-[340px] overflow-auto border border-[#b4a585]">
+                <table className="w-full min-w-[640px] border-collapse text-left text-[12.5px]">
+                  <thead className="sticky top-0 bg-[#2b2620] text-[#f2ead7]">
                     <tr>
-                      <th className="px-3 py-2 font-semibold">Fret</th>
-                      <th className="px-3 py-2 font-semibold">Scale Y</th>
-                      <th className="px-3 py-2 font-semibold">Machine Y</th>
-                      <th className="px-3 py-2 font-semibold">Board width</th>
-                      <th className="px-3 py-2 font-semibold">Slot length</th>
-                      <th className="px-3 py-2 font-semibold">X start</th>
-                      <th className="px-3 py-2 font-semibold">X end</th>
+                      {["Fret", "Scale Y", "Machine Y", "Board W", "Slot Len", "X Start", "X End"].map(
+                        (head, i) => (
+                          <th
+                            key={head}
+                            className={`px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] ${
+                              i === 0 ? "text-left" : "text-right"
+                            }`}
+                          >
+                            {head}
+                          </th>
+                        ),
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {layout.slots.map((slot) => (
-                      <tr key={slot.fret} className="border-t border-[#e6ded2]">
-                        <td className="px-3 py-2 font-medium">{slot.fret}</td>
-                        <td className="px-3 py-2">
+                      <tr key={slot.fret} className="border-b border-dotted border-[#b4a585]">
+                        <td className="px-3 py-1.5 font-bold">{slot.fret}</td>
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.scalePosition)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.y)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.fretboardWidth)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.slotLength)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.startX)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5 text-right">
                           {numberFormatter.format(slot.endX)}
                         </td>
                       </tr>
@@ -3482,9 +3454,9 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
-            </CollapsiblePanel>
+            </Panel>
           </div>
-        </section>
+        </div>
       </div>
     </main>
   );

@@ -1,32 +1,142 @@
+/* G Code — Machinist's Worksheet design system
+   Paper & ink palette, Oswald display + Courier Prime mono, square rules. */
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ---- Base palette: paper & ink ---- */
+  --paper: #f2ead7;            /* page / worksheet background */
+  --paper-raised: #faf4e4;     /* panel fill, sits on --paper */
+  --ink: #2b2620;              /* primary ink: text, borders, headers */
+  --ink-soft: #43361f;         /* hover-darkened ink, fret slot lines */
+  --ink-faint: #6e6354;        /* secondary text, field labels */
+  --rule: #8d7f63;             /* field underlines, inner hairlines */
+  --rule-faint: #b4a585;       /* dotted dividers, table row rules */
+
+  /* ---- Accents ---- */
+  --stamp-red: #9b3b2a;        /* op stamps, cutter paths, warnings */
+  --stamp-green: #1f6e54;      /* READY/SHARED stamps, save actions, origin */
+  --highlight: #bf3b1f;        /* hover highlight, dimension callouts */
+  --highlight-wash: rgba(191, 59, 31, 0.1);
+  --halo: rgba(244, 236, 219, 0.92);
+
+  /* ---- Drawing (technical preview) colors ---- */
+  --dwg-stock: #e9dec4;
+  --dwg-stock-line: #8d7f63;
+  --dwg-board: #dcc69c;
+  --dwg-board-line: #5c4a2e;
+  --dwg-cut: #9b3b2a;
+  --dwg-feature: #43361f;
+  --dwg-pocket: #fdf6e3;
+  --dwg-centerline: #a89878;
+  --dwg-aux: #8a7a5c;
+  --dwg-origin: #1f6e54;
+  --dwg-waste: rgba(155, 59, 42, 0.14);
+
+  /* ---- Preview variable mapping (set on the worksheet sheet root) ---- */
+  --pv-mat: var(--dwg-stock);
+  --pv-matline: var(--dwg-stock-line);
+  --pv-board: var(--dwg-board);
+  --pv-boardline: var(--dwg-board-line);
+  --pv-cut: var(--dwg-cut);
+  --pv-fret: var(--dwg-feature);
+  --pv-marker: var(--dwg-pocket);
+  --pv-markerline: var(--dwg-board-line);
+  --pv-string: var(--dwg-aux);
+  --pv-cl: var(--dwg-centerline);
+  --pv-nut: var(--ink);
+  --pv-tab: var(--dwg-cut);
+  --pv-hl: var(--highlight);
+  --pv-halo: var(--halo);
+  --pv-mut: var(--ink-faint);
+  --pv-origin: var(--dwg-origin);
+  --pv-arc: var(--dwg-origin);
+  --pv-waste: var(--dwg-waste);
+  --pv-font: var(--font-mono);
+
+  /* ---- Borders / radii ---- */
+  --border-panel: 2px solid var(--ink);
+  --border-double: 3px double var(--ink);
+  --border-input: 1.5px solid var(--rule);
+  --border-divider: 1px dotted var(--rule-faint);
+  --radius-sheet: 4px;
+  --shadow-sheet: 0 3px 14px rgba(43, 38, 32, 0.25);
+  --mat: #b1afa7;              /* gray drafting mat behind the sheet */
+
+  /* ---- Type families ---- */
+  --font-display: 'Oswald', sans-serif;     /* headings, big figures */
+  --font-mono: 'Courier Prime', monospace;  /* everything else */
+
+  --background: var(--paper);
+  --foreground: var(--ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: Arial, Helvetica, sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-mono);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+/* Display type: machinist worksheet headers are Oswald, uppercase, letterspaced */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 button,
 input,
 select {
   font: inherit;
+  font-family: var(--font-mono);
+}
+
+/* Square hairline number-spinner cleanup to match the worksheet inputs */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ---- Hover-to-dimension preview system (ported from the design) ----
+   Input labels carry data-h="<key>"; drawing geometry + dimension callouts
+   carry data-g="<key> <key> ...". A document mouseover adds .on to every
+   matching node: geometry glows in --pv-hl, callouts fade in. */
+.co {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.co.on {
+  opacity: 1;
+}
+.gl {
+  transition: filter 0.15s ease;
+}
+.gl.on {
+  stroke: var(--pv-hl);
+  filter: drop-shadow(0 0 2px var(--pv-hl)) drop-shadow(0 0 6px var(--pv-hl));
+}
+.glf.on {
+  fill: var(--pv-hl);
+}
+[data-h] {
+  transition: background 0.12s ease;
+}
+[data-h]:hover {
+  background: var(--highlight-wash);
 }
