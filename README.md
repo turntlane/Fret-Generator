@@ -28,3 +28,9 @@ The repository includes `netlify.toml` with:
 - Node version: `20`
 
 In Netlify, connect the Git repository and use the settings from `netlify.toml`.
+
+## SEO
+
+Metadata, Open Graph image, `robots.txt`, `sitemap.xml`, web manifest and JSON-LD structured data are generated at build time from `app/site.ts`.
+
+Set `NEXT_PUBLIC_SITE_URL` to the production origin (for example `https://your-domain.com`) in the Netlify build environment so canonical and Open Graph URLs point at the live site. Without it the fallback in `app/site.ts` is used.

@@ -2009,6 +2009,7 @@ function Panel({
   return (
     <section className="rounded-none border-2 border-[#2b2620] bg-[#faf4e4]">
       <div className="flex items-center gap-2.5 border-b-2 border-[#2b2620] px-3 py-2">
+        <h2 className="flex min-w-0 flex-1 font-[family-name:var(--font-mono)] font-normal normal-case tracking-normal">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-baseline gap-2.5 text-left"
@@ -2024,6 +2025,7 @@ function Panel({
             </span>
           ) : null}
         </button>
+        </h2>
         {actions ? <div className="shrink-0">{actions}</div> : null}
         {stamp ? <Stamp label={stamp} tone={stampTone} /> : null}
         <button
@@ -2597,9 +2599,9 @@ export default function Home() {
             <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#6e6354]">
               Form FB-22 · Rev C · Luthiery Dept.
             </div>
-            <div className="font-[family-name:var(--font-display)] text-[28px] font-semibold uppercase leading-none tracking-[0.04em] sm:text-[30px]">
+            <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold uppercase leading-none tracking-[0.04em] sm:text-[30px]">
               Fretboard G-Code Builder
-            </div>
+            </h1>
             <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#9b3b2a]">
               Surface · Slots · Cutout · Markers
             </div>
@@ -3457,6 +3459,62 @@ export default function Home() {
             </Panel>
           </div>
         </div>
+        {/* ---- About (crawlable description of what this tool does) ---- */}
+        <section
+          aria-labelledby="about-heading"
+          className="mt-6 grid gap-3 border-t-[1.5px] border-[#b4a585] px-1 pt-4 text-xs leading-relaxed text-[#6e6354] sm:grid-cols-2 sm:gap-x-8"
+        >
+          <div>
+            <h2 id="about-heading" className="text-base text-[#2b2620]">
+              About this fretboard G-code generator
+            </h2>
+            <p className="mt-1">
+              Fretboard G-Code Builder is a free online CNC G-code generator for
+              guitar and bass fretboards. Enter your scale length, number of
+              frets, string spread at the nut and bridge, fretboard overhang and
+              top radius, and it calculates every fret position and writes ready
+              to run toolpaths for a CNC router: radiused fret slots, top radius
+              surfacing, the fretboard outline cutout, and optional fret marker
+              or inlay pockets.
+            </p>
+            <p className="mt-2">
+              Each operation exports as its own program in millimetres or
+              inches, with a choice of .nc, .gcode, .tap, .cnc or .ngc file
+              extension, so the output loads directly into GRBL, Mach3, LinuxCNC
+              and most other G-code controllers or CNC senders. Everything runs
+              in your browser, nothing is uploaded, and no account is needed.
+            </p>
+          </div>
+          <div>
+            <h2 className="text-base text-[#2b2620]">What you can generate</h2>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              <li>
+                <strong className="text-[#2b2620]">Fret slots:</strong> equal
+                temperament fret spacing for any scale length and fret count,
+                with slot depth, slot cutter diameter, feed rate, depth per pass
+                and spindle speed, following the fretboard radius.
+              </li>
+              <li>
+                <strong className="text-[#2b2620]">Surface radius:</strong>{" "}
+                stepped fingerboard top radiusing passes for any fretboard radius.
+              </li>
+              <li>
+                <strong className="text-[#2b2620]">Cutout:</strong> tapered
+                fretboard outline profile with nut and last-fret margins.
+              </li>
+              <li>
+                <strong className="text-[#2b2620]">Markers:</strong> dot,
+                rectangle, diamond or trapezoid position marker pockets, including a double marker at the
+                12th fret.
+              </li>
+              <li>
+                <strong className="text-[#2b2620]">Fret schedule:</strong> a
+                fret position calculator table with cutter-center coordinates
+                for every slot.
+              </li>
+            </ul>
+          </div>
+        </section>
         <footer className="mt-6 flex flex-col gap-2 border-t-[3px] border-double border-[#2b2620] px-1 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base">Get in touch</h2>
