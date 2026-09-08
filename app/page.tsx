@@ -3457,6 +3457,20 @@ export default function Home() {
             </Panel>
           </div>
         </div>
+        <footer className="mt-6 flex flex-col gap-2 border-t-[3px] border-double border-[#2b2620] px-1 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base">Get in touch</h2>
+            <p className="mt-1 text-xs text-[#6e6354]">
+              Questions or feedback? Send me an email.
+            </p>
+          </div>
+          <a
+            href="mailto:imjakeal@gmail.com"
+            className="w-fit text-sm font-bold underline underline-offset-4 transition hover:text-[#1f6e54] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1f6e54]"
+          >
+            imjakeal@gmail.com
+          </a>
+        </footer>
       </div>
     </main>
   );
